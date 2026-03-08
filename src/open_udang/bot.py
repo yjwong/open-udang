@@ -576,13 +576,15 @@ async def _dispatch_to_agent(
         await _update_pinned_status(context.bot, chat_id, ctx_name, ctx_config, db)
 
     async def _run() -> None:
-        try:
-            # Create draft state early so it can be shared between the
-            # stream and the tool approval callback. This ensures the
-            # approval callback can finalize the in-progress draft
-            # before sending the keyboard, preserving message ordering.
-            draft_state = _DraftState(chat_id=chat_id)
+        # Create draft state early so it can be shared between the
+        # stream and the tool approval callback. This ensures the
+        # approval callback can finalize the in-progress draft
+        # before sending the keyboard, preserving message ordering.
+        # It also carries session_id for early capture so we can
+        # persist the session even if the task is cancelled.
+        draft_state = _DraftState(chat_id=chat_id)
 
+        try:
             async def request_approval(
                 tool_name: str, tool_input: dict[str, Any], tool_use_id: str
             ) -> bool:
@@ -633,6 +635,18 @@ async def _dispatch_to_agent(
             except Exception:
                 logger.exception("Failed to send error message")
         finally:
+            # Persist session_id even on cancellation so the next
+            # message can resume where this one left off.  The
+            # draft_state captures session_id as early as possible
+            # (from SystemMessage init), so it's usually available
+            # even if we never reached ResultMessage.
+            if draft_state.session_id:
+                try:
+                    await set_session_id(db, chat_id, ctx_name, draft_state.session_id)
+                except Exception:
+                    logger.debug(
+                        "Failed to save session on cleanup for chat %d", chat_id
+                    )
             _running_tasks.pop(chat_id, None)
 
     task = asyncio.create_task(_run())

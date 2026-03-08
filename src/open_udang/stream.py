@@ -67,6 +67,9 @@ class _DraftState:
     # Whether the last assistant turn has completed (AssistantMessage seen).
     # Used to insert a newline separator before text from the next turn.
     turn_complete: bool = False
+    # Session ID captured as early as possible (from SystemMessage init or
+    # ResultMessage) so it survives task cancellation.
+    session_id: str | None = None
 
 
 def _format_tool_prefix(notifications: list[ToolNotification]) -> str:
@@ -303,13 +306,20 @@ async def stream_response(
 
             elif isinstance(event, ResultMessage):
                 result.session_id = event.session_id
+                state.session_id = event.session_id
                 result.usage = event.usage
                 result.total_cost_usd = event.total_cost_usd
                 result.num_turns = event.num_turns
                 result.duration_ms = event.duration_ms
 
             elif isinstance(event, SystemMessage):
-                pass
+                # Capture session_id from init messages as early as
+                # possible so it's available even if the task is
+                # cancelled before ResultMessage arrives.
+                sid = getattr(event, "session_id", None)
+                if sid:
+                    state.session_id = sid
+                    result.session_id = sid
 
     finally:
         if draft_task:
