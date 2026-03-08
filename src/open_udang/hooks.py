@@ -42,6 +42,11 @@ ApprovalCallback = Callable[[str, dict[str, Any], str], Awaitable[bool]]
 # returns answers dict mapping question text -> answer string.
 QuestionCallback = Callable[[list[dict[str, Any]]], Awaitable[dict[str, str]]]
 
+# Type for the auto-approved edit notification callback: receives tool_name
+# and tool_input dict. Called (fire-and-forget) when a mutating tool is
+# auto-approved so the user can still see the diff without blocking.
+EditNotifyCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+
 # Tools that access the filesystem, mapped to the input key(s) containing
 # the path to check. Each value is a list of keys to try (first match wins).
 _PATH_SCOPED_TOOLS: dict[str, list[str]] = {
@@ -98,6 +103,7 @@ def make_can_use_tool(
     cwd: str,
     handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
+    notify_auto_approved_edit: EditNotifyCallback | None = None,
 ) -> Callable[
     [str, dict[str, Any], ToolPermissionContext], Awaitable[PermissionResult]
 ]:
@@ -128,6 +134,10 @@ def make_can_use_tool(
             has opted into "accept all edits" for the current session. When
             set and returning True, mutating tools (Edit, Write) within cwd
             are auto-approved without prompting.
+        notify_auto_approved_edit: Optional async callback called when a
+            mutating tool is auto-approved (accept-all-edits mode). Receives
+            the tool name and input dict so the caller can display the diff
+            without blocking the agent.
     """
 
     async def can_use_tool(
@@ -176,6 +186,17 @@ def make_can_use_tool(
                             tool_path,
                             cwd,
                         )
+                        # Notify the user with the diff (non-blocking)
+                        if notify_auto_approved_edit:
+                            try:
+                                await notify_auto_approved_edit(
+                                    tool_name, tool_input
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to send auto-approved edit "
+                                    "notification"
+                                )
                         return PermissionResultAllow()
                     logger.info(
                         "Mutating tool %s within cwd %s requires approval",

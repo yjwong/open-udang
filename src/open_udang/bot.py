@@ -712,6 +712,17 @@ async def _start_agent_task(
                     context.bot, chat_id, questions, draft_state
                 )
 
+            async def notify_edit(
+                tool_name: str, tool_input: dict[str, Any]
+            ) -> None:
+                # Finalize any in-progress draft so the diff message
+                # appears after the accumulated text, not out of order.
+                await finalize_and_reset(context.bot, draft_state)
+                await _send_auto_approved_diff(
+                    context.bot, chat_id, tool_name, tool_input,
+                    cwd=ctx_config.directory,
+                )
+
             events = run_agent(
                 prompt=prompt,
                 context=ctx_config,
@@ -720,6 +731,7 @@ async def _start_agent_task(
                 images=images if images else None,
                 handle_user_questions=handle_questions,
                 is_edit_auto_approved=lambda: (chat_id, ctx_name) in _edit_approved_sessions,
+                notify_auto_approved_edit=notify_edit,
             )
 
             result = await stream_response(
@@ -1203,6 +1215,38 @@ def _format_generic_approval(tool_name: str, tool_input: dict[str, Any]) -> str:
         val_escaped = _escape_mdv2(val_str)
         summary_parts.append(f"*{key_escaped}:* {val_escaped}")
     return "\n".join(summary_parts)
+
+
+async def _send_auto_approved_diff(
+    bot: Bot,
+    chat_id: int,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: str | None = None,
+) -> None:
+    """Send a read-only diff message for an auto-approved edit.
+
+    Similar to the approval keyboard but without buttons — just shows the
+    diff so the user can see what changed even when "accept all edits" is
+    active.
+    """
+    if tool_name == "Edit":
+        text = _format_edit_approval(tool_input, cwd=cwd)
+    elif tool_name == "Write":
+        text = _format_write_approval(tool_input, cwd=cwd)
+    else:
+        text = _format_generic_approval(tool_name, tool_input)
+
+    text += f"\n\n✅ _Auto\\-approved_"
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("Failed to send auto-approved diff notification")
 
 
 async def _send_approval_keyboard(

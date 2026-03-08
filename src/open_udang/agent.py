@@ -23,7 +23,12 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import StreamEvent
 
 from open_udang.config import ContextConfig
-from open_udang.hooks import ApprovalCallback, QuestionCallback, make_can_use_tool
+from open_udang.hooks import (
+    ApprovalCallback,
+    EditNotifyCallback,
+    QuestionCallback,
+    make_can_use_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +106,7 @@ async def run_agent(
     images: list[ImageAttachment] | None = None,
     handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
+    notify_auto_approved_edit: EditNotifyCallback | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run the Claude agent and yield streaming events.
 
@@ -113,6 +119,8 @@ async def run_agent(
         handle_user_questions: Optional callback for AskUserQuestion tool.
         is_edit_auto_approved: Optional callback returning True if the user
             has opted into "accept all edits" for the current session.
+        notify_auto_approved_edit: Optional callback to display diffs for
+            auto-approved edits without blocking the agent.
 
     Yields:
         AgentEvent messages (AssistantMessage, SystemMessage, ResultMessage)
@@ -131,6 +139,7 @@ async def run_agent(
         cwd=context.directory,
         handle_user_questions=handle_user_questions,
         is_edit_auto_approved=is_edit_auto_approved,
+        notify_auto_approved_edit=notify_auto_approved_edit,
     )
 
     def _log_stderr(line: str) -> None:
