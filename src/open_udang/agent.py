@@ -7,7 +7,7 @@ to consume and bridge to Telegram.
 
 import logging
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
@@ -100,6 +100,7 @@ async def run_agent(
     session_id: str | None = None,
     images: list[ImageAttachment] | None = None,
     handle_user_questions: QuestionCallback | None = None,
+    is_edit_auto_approved: Callable[[], bool] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run the Claude agent and yield streaming events.
 
@@ -110,6 +111,8 @@ async def run_agent(
         session_id: Optional session ID to resume a previous conversation.
         images: Optional list of image attachments to include in the prompt.
         handle_user_questions: Optional callback for AskUserQuestion tool.
+        is_edit_auto_approved: Optional callback returning True if the user
+            has opted into "accept all edits" for the current session.
 
     Yields:
         AgentEvent messages (AssistantMessage, SystemMessage, ResultMessage)
@@ -127,6 +130,7 @@ async def run_agent(
         request_approval=request_approval,
         cwd=context.directory,
         handle_user_questions=handle_user_questions,
+        is_edit_auto_approved=is_edit_auto_approved,
     )
 
     def _log_stderr(line: str) -> None:

@@ -9,12 +9,15 @@ via Telegram, collects answers, then denies the tool (to prevent the CLI from
 trying its own interactive UI) while passing the answers back via the deny
 message so Claude receives them.
 
-Path-scoped auto-approval: file-access tools (Read, Glob, Grep, Write, Edit)
+Path-scoped auto-approval: read-only file-access tools (Read, Glob, Grep)
 are auto-approved when their target paths resolve to within the context's
-working directory. Paths outside the working directory fall through to the
-interactive Telegram approval prompt. This prevents the agent from silently
-reading arbitrary files (e.g. ~/.ssh/*, config files with secrets) when these
-tools are removed from allowedTools and handled here instead.
+working directory. Mutating tools (Edit, Write) always require explicit
+approval, even within the working directory, unless the user has opted into
+"accept all edits" for the current session. Paths outside the working
+directory always fall through to the interactive Telegram approval prompt.
+This prevents the agent from silently reading arbitrary files (e.g. ~/.ssh/*,
+config files with secrets) when these tools are removed from allowedTools and
+handled here instead.
 """
 
 import logging
@@ -48,6 +51,11 @@ _PATH_SCOPED_TOOLS: dict[str, list[str]] = {
     "Glob": ["path"],     # optional; defaults to cwd when absent
     "Grep": ["path"],     # optional; defaults to cwd when absent
 }
+
+# Mutating file-access tools that require explicit approval even when the
+# target path is within the context working directory.  Read-only tools
+# (Read, Glob, Grep) are still auto-approved within cwd.
+_MUTATING_PATH_TOOLS: set[str] = {"Edit", "Write"}
 
 
 def _is_path_within_directory(path: str, directory: str) -> bool:
@@ -89,6 +97,7 @@ def make_can_use_tool(
     request_approval: ApprovalCallback,
     cwd: str,
     handle_user_questions: QuestionCallback | None = None,
+    is_edit_auto_approved: Callable[[], bool] | None = None,
 ) -> Callable[
     [str, dict[str, Any], ToolPermissionContext], Awaitable[PermissionResult]
 ]:
@@ -97,11 +106,12 @@ def make_can_use_tool(
     Tools already in allowedTools are handled by the CLI and never reach this
     callback. This handles everything else:
 
-    1. Path-scoped auto-approval: file-access tools (Read, Write, Edit, Glob,
-       Grep) are auto-approved when their target path resolves to within the
-       context working directory. Paths outside the cwd fall through to the
-       interactive approval prompt. This prevents silent access to files like
-       ~/.ssh/*, ~/.config/openudang/config.yaml, etc.
+    1. Path-scoped auto-approval for read-only tools: Read, Glob, and Grep
+       are auto-approved when their target path resolves to within the context
+       working directory. Mutating tools (Edit, Write) within cwd require
+       explicit approval unless the user has opted into "accept all edits"
+       for the session. Paths outside the cwd always fall through to the
+       interactive approval prompt.
 
     2. AskUserQuestion: presents questions to the user via Telegram, collects
        answers, then denies the tool to prevent the CLI's own interactive UI.
@@ -114,6 +124,10 @@ def make_can_use_tool(
         cwd: The context working directory for path-scoped auto-approval.
         handle_user_questions: Optional async callback for AskUserQuestion.
             Receives the questions list, returns answers dict.
+        is_edit_auto_approved: Optional callback that returns True if the user
+            has opted into "accept all edits" for the current session. When
+            set and returning True, mutating tools (Edit, Write) within cwd
+            are auto-approved without prompting.
     """
 
     async def can_use_tool(
@@ -145,19 +159,38 @@ def make_can_use_tool(
                 ),
             )
 
-        # Path-scoped auto-approval for file-access tools.
-        # If the tool targets a path within the context working directory,
-        # auto-approve without prompting the user.
+        # Path-scoped approval for file-access tools.
+        # Read-only tools (Read, Glob, Grep) are auto-approved when within
+        # cwd.  Mutating tools (Edit, Write) require explicit approval even
+        # within cwd, unless the user has opted into "accept all edits".
         tool_path = _extract_path_for_tool(tool_name, tool_input, cwd)
         if tool_path is not None:
             if _is_path_within_directory(tool_path, cwd):
-                logger.info(
-                    "Auto-approved %s: path %s is within cwd %s",
-                    tool_name,
-                    tool_path,
-                    cwd,
-                )
-                return PermissionResultAllow()
+                if tool_name in _MUTATING_PATH_TOOLS:
+                    # Check session-level "accept all edits" flag
+                    if is_edit_auto_approved and is_edit_auto_approved():
+                        logger.info(
+                            "Auto-approved %s (accept-all-edits): "
+                            "path %s is within cwd %s",
+                            tool_name,
+                            tool_path,
+                            cwd,
+                        )
+                        return PermissionResultAllow()
+                    logger.info(
+                        "Mutating tool %s within cwd %s requires approval",
+                        tool_name,
+                        cwd,
+                    )
+                    # Fall through to interactive approval
+                else:
+                    logger.info(
+                        "Auto-approved %s: path %s is within cwd %s",
+                        tool_name,
+                        tool_path,
+                        cwd,
+                    )
+                    return PermissionResultAllow()
             else:
                 logger.warning(
                     "Path-scoped tool %s targets %s outside cwd %s, "

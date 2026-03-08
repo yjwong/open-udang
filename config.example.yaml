@@ -16,10 +16,17 @@ contexts:
       - LSP
       - AskUserQuestion
       # Note: Read, Glob, Grep, Write, and Edit are intentionally NOT listed
-      # here. They are handled by OpenUdang's path-scoped auto-approval:
-      # paths within the context directory are auto-approved, paths outside
-      # require manual approval via Telegram. This prevents the agent from
-      # silently reading arbitrary files (e.g. ~/.ssh/*, config secrets).
+      # here. They are handled by OpenUdang's path-scoped approval:
+      #
+      # - Read, Glob, Grep: auto-approved when within the context directory.
+      # - Edit, Write: always require manual approval via Telegram, even
+      #   within the context directory. The approval prompt offers an
+      #   "Accept all edits" button to auto-approve future Edit/Write calls
+      #   for the rest of the session (cleared on /clear or context switch).
+      #
+      # Paths outside the context directory always require manual approval.
+      # This prevents the agent from silently accessing arbitrary files
+      # (e.g. ~/.ssh/*, config secrets).
       #
       # If you add them to allowed_tools, they bypass the path check entirely
       # and the agent can access any file the process can read.

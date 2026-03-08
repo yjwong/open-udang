@@ -22,7 +22,7 @@ Telegram <-> OpenUdang (Python, async) <-> Claude Agent SDK
 
 - **Context**: A working directory + CLAUDE.md. Switch with `/context <name>`. Each context has its own model, auto-approve list, and tools.
 - **Session**: A persistent Claude conversation. The Agent SDK handles persistence as `.jsonl` files under `~/.claude/projects/<encoded-cwd>/`. OpenUdang maps `(chat_id, context_name) -> session_id` in SQLite.
-- **Tool approval**: Uses the SDK's `allowedTools` for auto-approved tools (Read, Glob, Grep, patterns like `Bash(git *)`) and a `canUseTool` callback for everything else. The callback sends Telegram inline keyboards and `await`s the user's response.
+- **Tool approval**: Uses the SDK's `allowedTools` for auto-approved tools (patterns like `Bash(git *)`) and a `canUseTool` callback for everything else. Read-only file tools (Read, Glob, Grep) are auto-approved within the context working directory. Mutating tools (Edit, Write) always require explicit approval via Telegram inline keyboard, even within cwd, unless the user opts into "accept all edits" for the session. The callback sends Telegram inline keyboards and `await`s the user's response.
 
 ### Key SDK Patterns
 
