@@ -12,3 +12,6 @@ wheels/
 # Secrets
 config.yaml
 .env
+
+# User contexts
+contexts/
