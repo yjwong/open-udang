@@ -192,10 +192,39 @@ class TelegramRenderer(mistune.BaseRenderer):
         return f"~{text}~"
 
 
+def _is_inside_code_block(text: str, position: int) -> tuple[bool, str]:
+    """Check if a position in rendered MarkdownV2 text is inside a code block.
+
+    Counts unmatched ``` fences before the position.  Returns (is_inside, fence)
+    where fence is the opening fence line (e.g. "```python") so we can re-open
+    it in the next chunk.
+    """
+    inside = False
+    fence = "```"
+    i = 0
+    while i < position:
+        if text[i:i + 3] == "```":
+            if not inside:
+                # Capture the full fence line (e.g. ```python)
+                end = text.find("\n", i)
+                if end == -1 or end > position:
+                    end = position
+                fence = text[i:end]
+                inside = True
+            else:
+                inside = False
+            i += 3
+        else:
+            i += 1
+    return inside, fence
+
+
 def _split_message(text: str, max_length: int = TELEGRAM_MAX_LENGTH) -> list[str]:
     """Split a rendered message into chunks of at most max_length characters.
 
     Splits at natural boundaries: paragraph breaks, then line breaks.
+    Code-block-aware: if the split point falls inside a fenced code block,
+    the current chunk is closed with ``` and the next chunk reopens the fence.
     """
     text = text.strip()
     if not text:
@@ -213,21 +242,25 @@ def _split_message(text: str, max_length: int = TELEGRAM_MAX_LENGTH) -> list[str
 
         # Try to split at a paragraph boundary (double newline)
         split_at = remaining.rfind("\n\n", 0, max_length)
-        if split_at > 0:
-            chunks.append(remaining[:split_at].strip())
-            remaining = remaining[split_at + 2:]
-            continue
+        if split_at <= 0:
+            # Try to split at a single newline
+            split_at = remaining.rfind("\n", 0, max_length)
+        if split_at <= 0:
+            # Last resort: split at max_length
+            split_at = max_length
 
-        # Try to split at a single newline
-        split_at = remaining.rfind("\n", 0, max_length)
-        if split_at > 0:
-            chunks.append(remaining[:split_at].strip())
-            remaining = remaining[split_at + 1:]
-            continue
+        chunk = remaining[:split_at].strip()
+        rest = remaining[split_at:].lstrip("\n")
 
-        # Last resort: split at max_length
-        chunks.append(remaining[:max_length].strip())
-        remaining = remaining[max_length:]
+        # Check if we're splitting inside a code block
+        inside, fence = _is_inside_code_block(remaining, split_at)
+        if inside:
+            # Close the code block in this chunk, reopen in the next
+            chunk = chunk + "\n```"
+            rest = fence + "\n" + rest
+
+        chunks.append(chunk)
+        remaining = rest
 
     return [c for c in chunks if c]
 
