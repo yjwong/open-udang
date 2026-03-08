@@ -30,7 +30,7 @@ from telegram.ext import (
     filters,
 )
 
-from open_udang.agent import ImageAttachment, run_agent
+from open_udang.agent import FileAttachment, ImageAttachment, run_agent
 from open_udang.config import Config, ContextConfig
 from open_udang.db import (
     delete_session,
@@ -488,8 +488,29 @@ async def _download_telegram_photos(
     return attachments
 
 
+async def _download_telegram_documents(
+    messages: list[Any], bot: Bot
+) -> list[FileAttachment]:
+    """Download documents from one or more Telegram messages and return as FileAttachments.
+
+    Telegram documents include PDFs, text files, and other non-photo file
+    uploads.  Each message may have at most one document.
+    """
+    attachments: list[FileAttachment] = []
+    for message in messages:
+        if not message.document:
+            continue
+        doc = message.document
+        file = await bot.get_file(doc.file_id)
+        doc_bytes = bytes(await file.download_as_bytearray())
+        mime_type = doc.mime_type or "application/octet-stream"
+        filename = doc.file_name
+        attachments.append(FileAttachment(data=doc_bytes, mime_type=mime_type, filename=filename))
+    return attachments
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming text and photo messages: route to Claude agent.
+    """Handle incoming text, photo, and document messages: route to Claude agent.
 
     For media groups (albums with multiple photos), messages are batched
     using a short delay so all photos are collected before processing.
@@ -500,19 +521,20 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not message:
         return
 
-    # Must have text, caption, photo, or location
+    # Must have text, caption, photo, document, or location
     has_text = bool(message.text)
     has_photo = bool(message.photo)
+    has_document = bool(message.document)
     has_caption = bool(message.caption)
     has_location = bool(message.location)
 
     logger.info(
-        "message_handler: chat=%s has_text=%s has_photo=%s has_caption=%s has_location=%s media_group_id=%s",
-        message.chat_id, has_text, has_photo, has_caption, has_location, message.media_group_id,
+        "message_handler: chat=%s has_text=%s has_photo=%s has_document=%s has_caption=%s has_location=%s media_group_id=%s",
+        message.chat_id, has_text, has_photo, has_document, has_caption, has_location, message.media_group_id,
     )
 
-    if not has_text and not has_photo and not has_location:
-        logger.info("message_handler: no text, photo, or location, ignoring")
+    if not has_text and not has_photo and not has_document and not has_location:
+        logger.info("message_handler: no text, photo, document, or location, ignoring")
         return
 
     if not _is_authorized(update.effective_user and update.effective_user.id, config):
@@ -540,7 +562,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     # If this message is part of a media group (album), batch it.
-    if message.media_group_id and has_photo:
+    if message.media_group_id and (has_photo or has_document):
         await _handle_media_group_message(update, context, message)
         return
 
@@ -565,16 +587,25 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # For photos without a caption, use a default prompt
     if not prompt and has_photo:
         prompt = "What's in this image?"
+    elif not prompt and has_document:
+        prompt = "What's in this file?"
     elif not prompt:
         return
 
-    # Download photo attachments if present
+    # Download photo and document attachments if present
     images: list[ImageAttachment] = []
     if has_photo:
         images = await _download_telegram_photos([message], context.bot)
         logger.info(
             "Downloaded %d photo(s) for chat %d (%d bytes)",
             len(images), chat_id, sum(len(img.data) for img in images),
+        )
+    if has_document:
+        doc_attachments = await _download_telegram_documents([message], context.bot)
+        images.extend(doc_attachments)
+        logger.info(
+            "Downloaded %d document(s) for chat %d (%d bytes)",
+            len(doc_attachments), chat_id, sum(len(att.data) for att in doc_attachments),
         )
 
     await _dispatch_to_agent(prompt, images, chat_id, config, db, context)
@@ -626,12 +657,22 @@ async def _handle_media_group_message(
 
         prompt = _strip_mention(raw_text, bot_username) if raw_text else ""
         if not prompt:
-            count = len(messages)
-            prompt = f"What's in {'this image' if count == 1 else 'these images'}?"
+            has_any_photo = any(msg.photo for msg in messages)
+            has_any_doc = any(msg.document for msg in messages)
+            if has_any_photo and not has_any_doc:
+                count = len(messages)
+                prompt = f"What's in {'this image' if count == 1 else 'these images'}?"
+            elif has_any_doc and not has_any_photo:
+                count = sum(1 for msg in messages if msg.document)
+                prompt = f"What's in {'this file' if count == 1 else 'these files'}?"
+            else:
+                prompt = "What's in these files?"
 
         images = await _download_telegram_photos(messages, context.bot)
+        doc_attachments = await _download_telegram_documents(messages, context.bot)
+        images.extend(doc_attachments)
         logger.info(
-            "Media group %s complete: %d photo(s) for chat %d (%d bytes)",
+            "Media group %s complete: %d attachment(s) for chat %d (%d bytes)",
             group_id, len(images), chat_id, sum(len(img.data) for img in images),
         )
 
@@ -1505,9 +1546,9 @@ def build_application(config: Config, db: aiosqlite.Connection) -> Application:
     # Callback query handler for tool approval buttons
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
-    # Message handler (text, photos, and locations, non-command)
+    # Message handler (text, photos, documents, and locations, non-command)
     app.add_handler(MessageHandler(
-        (filters.TEXT | filters.PHOTO | filters.LOCATION) & ~filters.COMMAND, message_handler
+        (filters.TEXT | filters.PHOTO | filters.Document.ALL | filters.LOCATION) & ~filters.COMMAND, message_handler
     ))
 
     return app

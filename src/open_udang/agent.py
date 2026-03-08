@@ -35,11 +35,16 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ImageAttachment:
-    """An image attachment to include in the prompt."""
+class FileAttachment:
+    """A file attachment to include in the prompt (image, PDF, etc.)."""
 
-    data: bytes  # raw image bytes
-    mime_type: str  # e.g. "image/jpeg", "image/png"
+    data: bytes  # raw file bytes
+    mime_type: str  # e.g. "image/jpeg", "application/pdf"
+    filename: str | None = None  # original filename, if available
+
+
+# Keep backward-compatible alias.
+ImageAttachment = FileAttachment
 
 
 # Map MIME types to file extensions.
@@ -48,6 +53,20 @@ _MIME_TO_EXT: dict[str, str] = {
     "image/png": ".png",
     "image/gif": ".gif",
     "image/webp": ".webp",
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+    "text/csv": ".csv",
+    "text/html": ".html",
+    "text/markdown": ".md",
+    "application/json": ".json",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/zip": ".zip",
+    "application/x-tar": ".tar",
+    "application/gzip": ".tar.gz",
 }
 
 
@@ -63,36 +82,38 @@ class AgentResult:
 AgentEvent = Union[AssistantMessage, UserMessage, SystemMessage, ResultMessage, StreamEvent]
 
 
-def _save_images_to_temp(images: list[ImageAttachment]) -> list[Path]:
-    """Save image attachments to temp files and return their paths.
+def _save_attachments_to_temp(attachments: list[FileAttachment]) -> list[Path]:
+    """Save file attachments to temp files and return their paths.
 
     Files are created with delete=False so they persist for the agent to
     read.  The caller is responsible for cleanup (or we rely on OS temp
     cleanup).
     """
     paths: list[Path] = []
-    for img in images:
-        ext = _MIME_TO_EXT.get(img.mime_type, ".jpg")
+    for att in attachments:
+        ext = _MIME_TO_EXT.get(att.mime_type, ".bin")
+        # Use original filename as part of the temp name if available.
+        prefix = f"openudang_{att.filename}_" if att.filename else "openudang_"
         tmp = tempfile.NamedTemporaryFile(
-            suffix=ext, prefix="openudang_img_", delete=False
+            suffix=ext, prefix=prefix, delete=False
         )
-        tmp.write(img.data)
+        tmp.write(att.data)
         tmp.close()
         paths.append(Path(tmp.name))
-        logger.info("Saved image to %s (%d bytes)", tmp.name, len(img.data))
+        logger.info("Saved attachment to %s (%d bytes, %s)", tmp.name, len(att.data), att.mime_type)
     return paths
 
 
-def _build_prompt_with_images(prompt: str, image_paths: list[Path]) -> str:
-    """Prepend image file references to the user prompt."""
+def _build_prompt_with_attachments(prompt: str, attachment_paths: list[Path]) -> str:
+    """Prepend file references to the user prompt."""
     parts: list[str] = []
-    if len(image_paths) == 1:
+    if len(attachment_paths) == 1:
         parts.append(
-            f"The user attached an image. Read it from: {image_paths[0]}"
+            f"The user attached a file. Read it from: {attachment_paths[0]}"
         )
     else:
-        parts.append("The user attached images. Read them from:")
-        for p in image_paths:
+        parts.append("The user attached files. Read them from:")
+        for p in attachment_paths:
             parts.append(f"  - {p}")
     parts.append("")
     parts.append(prompt)
@@ -104,7 +125,7 @@ async def run_agent(
     context: ContextConfig,
     request_approval: ApprovalCallback,
     session_id: str | None = None,
-    images: list[ImageAttachment] | None = None,
+    images: list[FileAttachment] | None = None,
     handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
     notify_auto_approved_edit: EditNotifyCallback | None = None,
@@ -156,11 +177,11 @@ async def run_agent(
         can_use_tool=can_use_tool,
     )
 
-    # Save images to temp files and build the prompt with file references.
-    image_paths: list[Path] = []
+    # Save attachments to temp files and build the prompt with file references.
+    attachment_paths: list[Path] = []
     if images:
-        image_paths = _save_images_to_temp(images)
-        actual_prompt = _build_prompt_with_images(prompt, image_paths)
+        attachment_paths = _save_attachments_to_temp(images)
+        actual_prompt = _build_prompt_with_attachments(prompt, attachment_paths)
     else:
         actual_prompt = prompt
 
@@ -193,7 +214,7 @@ async def run_agent(
             raise
     finally:
         # Clean up temp files
-        for p in image_paths:
+        for p in attachment_paths:
             try:
                 p.unlink(missing_ok=True)
             except Exception:
