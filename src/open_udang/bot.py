@@ -708,6 +708,23 @@ def _format_bash_approval(tool_input: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+def _format_write_approval(tool_input: dict[str, Any]) -> str:
+    """Format a Write tool call for the approval prompt."""
+    file_path = tool_input.get("file_path", "unknown")
+    content = tool_input.get("content", "")
+
+    escaped_path = _escape_mdv2(file_path)
+    header = f"📝 *Write:* `{escaped_path}`"
+
+    # Truncate if the content is too long for a single Telegram message.
+    max_content_len = 4096 - 200
+    if len(content) > max_content_len:
+        content = content[:max_content_len] + "\n..."
+
+    escaped_content = _escape_mdv2(content)
+    return f"{header}\n\n```\n{escaped_content}\n```"
+
+
 def _format_generic_approval(tool_name: str, tool_input: dict[str, Any]) -> str:
     """Format a generic tool call for the approval prompt."""
     summary_parts = [f"*Tool:* `{tool_name}`"]
@@ -733,6 +750,8 @@ async def _send_approval_keyboard(
         text = _format_edit_approval(tool_input)
     elif tool_name == "Bash":
         text = _format_bash_approval(tool_input)
+    elif tool_name == "Write":
+        text = _format_write_approval(tool_input)
     else:
         text = _format_generic_approval(tool_name, tool_input)
 
