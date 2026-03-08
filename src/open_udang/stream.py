@@ -25,7 +25,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 from claude_agent_sdk.types import StreamEvent
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from open_udang.agent import AgentEvent
 from open_udang.markdown import gfm_to_telegram
@@ -41,6 +41,10 @@ BASH_OUTPUT_MAX_CHARS = 1500
 # Tools whose blockquote notifications are suppressed because their output
 # is shown directly (Bash output as code block, Write via edit notification).
 _SUPPRESS_NOTIFICATION_TOOLS: set[str] = {"Bash", "Edit", "Write"}
+
+# Stored Bash outputs for on-demand reveal via inline keyboard button.
+# Keyed by a unique callback ID, value is the formatted GFM output string.
+_bash_output_store: dict[str, str] = {}
 
 
 @dataclass
@@ -245,6 +249,36 @@ def _extract_tool_summary(
     return ""
 
 
+def _extract_bash_output_text(
+    content: str | list[dict[str, Any]] | None,
+) -> str:
+    """Extract plain text from Bash tool result content."""
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts = [
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        return "\n".join(parts)
+    return content
+
+
+def _format_bash_header(tool_input: dict[str, Any]) -> str:
+    """Format a compact Bash header with command for the button message."""
+    command = tool_input.get("command", "")
+    description = tool_input.get("description", "")
+
+    if description:
+        header = f"💻 **Bash:** {description}"
+    else:
+        header = "💻 **Bash**"
+
+    cmd_display = command[:200] + "..." if len(command) > 200 else command
+    cmd_block = f"```bash\n{cmd_display}\n```"
+    return f"{header}\n\n{cmd_block}"
+
+
 def _format_bash_output(
     tool_input: dict[str, Any],
     content: str | list[dict[str, Any]] | None,
@@ -256,35 +290,11 @@ def _format_bash_output(
     to BASH_OUTPUT_MAX_LINES / BASH_OUTPUT_MAX_CHARS, keeping the tail
     (most recent output) when truncation is needed.
     """
-    command = tool_input.get("command", "")
-    description = tool_input.get("description", "")
+    header_block = _format_bash_header(tool_input)
 
-    # Header: "💻 **Bash:** description" or just "💻 **Bash**"
-    if description:
-        header = f"💻 **Bash:** {description}"
-    else:
-        header = "💻 **Bash**"
-
-    # Command in a bash code block.
-    cmd_display = command[:200] + "..." if len(command) > 200 else command
-    cmd_block = f"```bash\n{cmd_display}\n```"
-
-    # Format the output.
-    if content is None:
-        output_text = ""
-    elif isinstance(content, list):
-        # Multi-part content (e.g. text + image blocks) — extract text parts.
-        parts = [
-            block.get("text", "") for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        ]
-        output_text = "\n".join(parts)
-    else:
-        output_text = content
-
-    output_text = output_text.strip()
+    output_text = _extract_bash_output_text(content).strip()
     if not output_text:
-        return f"{header}\n\n{cmd_block}\n\n"
+        return f"{header_block}\n\n_No output\\._"
 
     lines = output_text.splitlines()
     truncated = False
@@ -300,7 +310,61 @@ def _format_bash_output(
     prefix = "…(truncated)\n" if truncated else ""
     output_block = f"Output:\n```\n{prefix}{result}\n```"
 
-    return f"{header}\n\n{cmd_block}\n\n{output_block}\n\n"
+    return f"{header_block}\n\n{output_block}"
+
+
+async def _send_bash_button(
+    bot: Bot,
+    state: _DraftState,
+    tool_input: dict[str, Any],
+    content: str | list[dict[str, Any]] | None,
+) -> None:
+    """Send a compact Bash message with a 'Show output' inline button.
+
+    Finalizes any in-progress draft first to preserve message ordering,
+    then sends a standalone message showing the command with an inline
+    keyboard button to reveal the output on demand.
+    """
+    # Finalize any in-progress draft so the bash button appears in order.
+    await finalize_and_reset(bot, state)
+
+    header = _format_bash_header(tool_input)
+    header_chunks = gfm_to_telegram(header)
+    header_text = header_chunks[0] if header_chunks else ""
+
+    # Check if there's any actual output to show.
+    output_text = _extract_bash_output_text(content).strip()
+    if not output_text:
+        # No output — send the header without a button.
+        try:
+            msg = await bot.send_message(
+                chat_id=state.chat_id,
+                text=header_text + "\n\n_No output\\._",
+                parse_mode="MarkdownV2",
+            )
+            state.sent_message_ids.append(msg.message_id)
+        except Exception:
+            logger.exception("Failed to send bash header (no output)")
+        return
+
+    # Store the full formatted output for later retrieval.
+    callback_id = f"show_bash:{random.randint(1, 2**63 - 1)}"
+    _bash_output_store[callback_id] = _format_bash_output(tool_input, content)
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📋 Show output", callback_data=callback_id)]]
+    )
+
+    try:
+        msg = await bot.send_message(
+            chat_id=state.chat_id,
+            text=header_text,
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard,
+        )
+        state.sent_message_ids.append(msg.message_id)
+    except Exception:
+        logger.exception("Failed to send bash button message")
 
 
 async def finalize_and_reset(bot: Bot, state: _DraftState) -> None:
@@ -401,7 +465,8 @@ async def stream_response(
 
             elif isinstance(event, UserMessage):
                 # UserMessage carries tool results (ToolResultBlock).
-                # Display Bash output as a fenced code block.
+                # For Bash, send a collapsible message with a "Show output"
+                # button instead of embedding the output inline.
                 if isinstance(event.content, list):
                     for block in event.content:
                         if isinstance(block, ToolResultBlock):
@@ -410,15 +475,10 @@ async def stream_response(
                             )
                             if tool_info and tool_info[0] == "Bash":
                                 tool_input = tool_info[1]
-                                formatted = _format_bash_output(
-                                    tool_input, block.content,
+                                await _send_bash_button(
+                                    bot, state, tool_input,
+                                    block.content,
                                 )
-                                if formatted:
-                                    if state.turn_complete:
-                                        state.raw_text += "\n\n"
-                                        state.turn_complete = False
-                                    state.raw_text += formatted
-                                    state.dirty = True
 
             elif isinstance(event, StreamEvent):
                 # Token-level streaming: extract text deltas from raw

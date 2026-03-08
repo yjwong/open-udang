@@ -44,6 +44,7 @@ from open_udang.db import (
 from open_udang.stream import (
     StreamResult,
     _DraftState,
+    _bash_output_store,
     _relative_path,
     add_tool_notification,
     finalize_and_reset,
@@ -1360,6 +1361,35 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 )
             except Exception:
                 logger.exception("Failed to expand Agent prompt")
+        return
+
+    # Handle "Show output" for Bash tool results
+    if data.startswith("show_bash:"):
+        formatted_output = _bash_output_store.pop(data, None)
+        if not formatted_output:
+            await query.answer("Output data no longer available.")
+            return
+
+        await query.answer()
+
+        if query.message:
+            from open_udang.markdown import gfm_to_telegram
+
+            chunks = gfm_to_telegram(formatted_output)
+            expanded_text = chunks[0] if chunks else ""
+            try:
+                await query.message.edit_text(
+                    text=expanded_text,
+                    parse_mode="MarkdownV2",
+                    reply_markup=None,
+                )
+            except Exception:
+                logger.exception("Failed to expand Bash output")
+                # Fallback: just remove the button
+                try:
+                    await query.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    logger.exception("Failed to remove bash button")
         return
 
     # Handle "Accept all edits" — approve this tool and enable auto-approval
