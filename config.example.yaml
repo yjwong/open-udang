@@ -12,12 +12,15 @@ contexts:
     directory: /home/you/Documents/your-project
     description: "Default context"
     model: claude-sonnet-4-6
-    auto_approve_tools:
+    allowed_tools:
       - Read
       - Glob
       - Grep
       - LSP
       - AskUserQuestion
+      # Patterns are supported — these are passed to the Claude CLI as --allowedTools
+      # - "Bash(git *)"        # allow all git commands
+      # - "Edit(/safe/dir/*)"  # allow edits only in a specific directory
     # default_for_chats:
     #   - -1001234567890  # Sets initial context for this group chat
     # locked_for_chats:

@@ -22,7 +22,7 @@ Telegram <-> OpenUdang (Python, async) <-> Claude Agent SDK
 
 - **Context**: A working directory + CLAUDE.md. Switch with `/context <name>`. Each context has its own model, auto-approve list, and tools.
 - **Session**: A persistent Claude conversation. The Agent SDK handles persistence as `.jsonl` files under `~/.claude/projects/<encoded-cwd>/`. OpenUdang maps `(chat_id, context_name) -> session_id` in SQLite.
-- **Tool approval**: `PreToolUse` hooks intercept tool calls. Auto-approved tools (Read, Glob, Grep) pass through. Others send Telegram inline keyboards and `await` the user's response.
+- **Tool approval**: Uses the SDK's `allowedTools` for auto-approved tools (Read, Glob, Grep, patterns like `Bash(git *)`) and a `canUseTool` callback for everything else. The callback sends Telegram inline keyboards and `await`s the user's response.
 
 ### Key SDK Patterns
 
@@ -39,23 +39,14 @@ async with ClaudeSDKClient(options=options) as client:
 # Resume across restarts
 options = ClaudeAgentOptions(resume=session_id, cwd="/path/to/context")
 
-# PreToolUse hook for tool approval
-async def tool_approval_hook(input_data, tool_use_id, context):
-    if input_data["tool_name"] in auto_approve_list:
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-            }
-        }
+# canUseTool callback for tool approval (tools not in allowedTools)
+async def can_use_tool(tool_name, tool_input, context):
     # Send Telegram inline keyboard, await callback
-    decision = await wait_for_telegram_approval(input_data)
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow" if decision else "deny",
-        }
-    }
+    approved = await wait_for_telegram_approval(tool_name, tool_input)
+    if approved:
+        return PermissionResultAllow()
+    else:
+        return PermissionResultDeny(message="User denied tool use.")
 ```
 
 ## Project Structure
@@ -66,7 +57,7 @@ src/open_udang/
     main.py          # Entry point, arg parsing, config loading
     bot.py            # Telegram bot setup, handlers, long polling
     agent.py          # Claude Agent SDK wrapper, session management
-    hooks.py          # PreToolUse hooks, tool approval logic
+    hooks.py          # canUseTool callback, tool approval logic
     stream.py         # Stream bridge: SDK messages -> sendMessageDraft
     config.py         # Config loading and validation (YAML)
     db.py             # SQLite session ID mapping
@@ -80,7 +71,7 @@ Config lives at `~/.config/openudang/config.yaml`. See `config.example.yaml` for
 Key fields:
 - `telegram.token` - Bot token from @BotFather
 - `allowed_users` - List of Telegram user IDs (integers)
-- `contexts` - Map of context name -> {directory, description, model, auto_approve_tools, default_for_chats}
+- `contexts` - Map of context name -> {directory, description, model, allowed_tools, default_for_chats}
 - `default_context` - Context name to use when none is specified
 
 `ANTHROPIC_API_KEY` is read from the environment, not the config file.

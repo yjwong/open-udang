@@ -221,7 +221,7 @@ async def stream_response(
     chat_id: int,
     events: AsyncIterator[AgentEvent],
     draft_state: _DraftState | None = None,
-    auto_approve_tools: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> StreamResult:
     """Stream Agent SDK events to Telegram as draft messages.
 
@@ -236,14 +236,14 @@ async def stream_response(
             same state can be shared with tool approval callbacks so they
             can finalize the draft before sending approval keyboards,
             ensuring correct message ordering.
-        auto_approve_tools: List of tool names that are auto-approved.
+        allowed_tools: List of allowed tool patterns from config.
             Used to tag inline tool notifications as "(auto)".
 
     Returns:
         StreamResult with session_id, usage, cost, and timing info.
     """
     state = draft_state or _DraftState(chat_id=chat_id)
-    auto_set = set(auto_approve_tools or [])
+    auto_set = set(allowed_tools or [])
     result = StreamResult()
     draft_task: asyncio.Task[None] | None = None
 

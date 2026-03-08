@@ -16,7 +16,6 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
-    HookMatcher,
     ResultMessage,
     SystemMessage,
     TextBlock,
@@ -24,7 +23,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import StreamEvent
 
 from open_udang.config import ContextConfig
-from open_udang.hooks import ApprovalCallback, QuestionCallback, make_tool_approval_hook
+from open_udang.hooks import ApprovalCallback, QuestionCallback, make_can_use_tool
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +105,7 @@ async def run_agent(
 
     Args:
         prompt: User message to send to Claude.
-        context: Context config with directory, model, auto_approve_tools.
+        context: Context config with directory, model, allowed_tools.
         request_approval: Async callback for interactive tool approval.
         session_id: Optional session ID to resume a previous conversation.
         images: Optional list of image attachments to include in the prompt.
@@ -124,8 +123,7 @@ async def run_agent(
     Supports cancellation via asyncio task cancellation — the async with
     block will clean up the client on CancelledError.
     """
-    tool_hook = make_tool_approval_hook(
-        auto_approve_tools=context.auto_approve_tools,
+    can_use_tool = make_can_use_tool(
         request_approval=request_approval,
         handle_user_questions=handle_user_questions,
     )
@@ -136,13 +134,11 @@ async def run_agent(
     options = ClaudeAgentOptions(
         cwd=context.directory,
         model=context.model,
-        permission_mode="bypassPermissions",
+        allowed_tools=context.allowed_tools,
         setting_sources=["project"],
         include_partial_messages=True,
         stderr=_log_stderr,
-        hooks={
-            "PreToolUse": [HookMatcher(matcher=".*", hooks=[tool_hook])],
-        },
+        can_use_tool=can_use_tool,
     )
 
     # Save images to temp files and build the prompt with file references.

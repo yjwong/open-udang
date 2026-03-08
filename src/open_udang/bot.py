@@ -653,7 +653,7 @@ async def _dispatch_to_agent(
                 chat_id=chat_id,
                 events=events,
                 draft_state=draft_state,
-                auto_approve_tools=ctx_config.auto_approve_tools,
+                allowed_tools=ctx_config.allowed_tools,
             )
 
             if result.session_id:

@@ -19,7 +19,7 @@ class ContextConfig:
     directory: str
     description: str
     model: str
-    auto_approve_tools: list[str]
+    allowed_tools: list[str]
     default_for_chats: list[int] = field(default_factory=list)
     locked_for_chats: list[int] = field(default_factory=list)
 
@@ -62,13 +62,13 @@ def _validate_raw(raw: dict) -> None:
     for name, ctx in contexts.items():
         if not isinstance(ctx, dict):
             raise ValueError(f"Context '{name}' must be a mapping")
-        for field_name in ("directory", "description", "model", "auto_approve_tools"):
+        for field_name in ("directory", "description", "model", "allowed_tools"):
             if field_name not in ctx:
                 raise ValueError(
                     f"Context '{name}' missing required field: {field_name}"
                 )
-        if not isinstance(ctx["auto_approve_tools"], list):
-            raise ValueError(f"Context '{name}': auto_approve_tools must be a list")
+        if not isinstance(ctx["allowed_tools"], list):
+            raise ValueError(f"Context '{name}': allowed_tools must be a list")
 
     # default_context references a defined context
     default = raw["default_context"]
@@ -87,7 +87,7 @@ def _parse(raw: dict) -> Config:
             directory=ctx["directory"],
             description=ctx["description"],
             model=ctx["model"],
-            auto_approve_tools=ctx["auto_approve_tools"],
+            allowed_tools=ctx["allowed_tools"],
             default_for_chats=ctx.get("default_for_chats", []),
             locked_for_chats=ctx.get("locked_for_chats", []),
         )
