@@ -461,6 +461,95 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text("Nothing running\\.", parse_mode="MarkdownV2")
 
 
+# Maximum number of sessions to show in /resume list.
+_RESUME_LIST_LIMIT = 10
+
+# Pending resume selections: callback_data -> session_id
+_resume_selections: dict[str, str] = {}
+
+
+async def resume_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /resume command: list recent sessions or resume a specific one.
+
+    Usage:
+        /resume          - Show recent sessions for the current context
+        /resume <id>     - Resume a session by ID (prefix match supported)
+    """
+    from claude_agent_sdk import list_sessions
+
+    config: Config = context.bot_data["config"]
+    db: aiosqlite.Connection = context.bot_data["db"]
+    message = update.effective_message
+    if not message or not _is_authorized(update.effective_user and update.effective_user.id, config):
+        return
+
+    chat_id = message.chat_id
+    ctx_name, ctx = await _get_context(chat_id, config, db)
+
+    args = message.text.split() if message.text else []
+
+    if len(args) >= 2:
+        # Direct resume by session ID (or prefix)
+        target = args[1]
+        sessions = await asyncio.to_thread(list_sessions, directory=ctx.directory)
+        match = None
+        for s in sessions:
+            if s.session_id == target or s.session_id.startswith(target):
+                match = s
+                break
+
+        if not match:
+            await message.reply_text(
+                f"No session matching `{_escape_mdv2(target)}` found in context `{_escape_mdv2(ctx_name)}`\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+
+        await set_session_id(db, chat_id, ctx_name, match.session_id)
+        summary = _escape_mdv2(match.summary or "No summary")
+        await message.reply_text(
+            f"Resumed session `{_escape_mdv2(match.session_id[:12])}...`\n_{summary}_",
+            parse_mode="MarkdownV2",
+        )
+        await _update_pinned_status(context.bot, chat_id, ctx_name, ctx, db)
+        return
+
+    # List recent sessions for the current context
+    sessions = await asyncio.to_thread(
+        list_sessions, directory=ctx.directory, limit=_RESUME_LIST_LIMIT
+    )
+
+    if not sessions:
+        await message.reply_text(
+            f"No sessions found for context `{_escape_mdv2(ctx_name)}`\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    current_session_id = await get_session_id(db, chat_id, ctx_name)
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for s in sessions:
+        summary = s.summary or "No summary"
+        # Truncate long summaries for button text
+        if len(summary) > 60:
+            summary = summary[:57] + "..."
+        sid_short = s.session_id[:8]
+        marker = " (current)" if s.session_id == current_session_id else ""
+        label = f"{sid_short} - {summary}{marker}"
+
+        cb_data = f"resume:{s.session_id}"
+        _resume_selections[cb_data] = s.session_id
+        buttons.append([InlineKeyboardButton(label, callback_data=cb_data)])
+
+    keyboard = InlineKeyboardMarkup(buttons)
+    await message.reply_text(
+        f"*Recent sessions for* `{_escape_mdv2(ctx_name)}`*:*",
+        parse_mode="MarkdownV2",
+        reply_markup=keyboard,
+    )
+
+
 # ── Message handler ──
 
 
@@ -1378,6 +1467,47 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer("Unauthorized.")
         return
 
+    # Handle /resume session selection
+    if data.startswith("resume:"):
+        db: aiosqlite.Connection = context.bot_data["db"]
+        session_id = _resume_selections.pop(data, None)
+        if not session_id:
+            await query.answer("This selection has expired.")
+            return
+
+        chat_id = query.message.chat_id if query.message else None
+        if chat_id is None:
+            await query.answer("Cannot determine chat.")
+            return
+
+        ctx_name, ctx = await _get_context(chat_id, config, db)
+        await set_session_id(db, chat_id, ctx_name, session_id)
+        await query.answer(f"Resumed session {session_id[:8]}...")
+
+        if query.message:
+            try:
+                summary_text = f"✅ Resumed session `{_escape_mdv2(session_id[:12])}\\.\\.\\.`"
+                await query.message.edit_text(
+                    text=summary_text,
+                    parse_mode="MarkdownV2",
+                    reply_markup=None,
+                )
+            except Exception:
+                logger.exception("Failed to update resume message")
+                try:
+                    await query.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    logger.exception("Failed to remove resume keyboard")
+
+        await _update_pinned_status(
+            context.bot, chat_id, ctx_name, ctx, db
+        )
+        # Clean up remaining selections from this listing
+        expired = [k for k in _resume_selections if k.startswith("resume:")]
+        for k in expired:
+            _resume_selections.pop(k, None)
+        return
+
     # Handle "Show prompt" expansion for Agent tool
     if data.startswith("show_prompt:"):
         tool_use_id = data[len("show_prompt:"):]
@@ -1542,6 +1672,7 @@ def build_application(config: Config, db: aiosqlite.Connection) -> Application:
     app.add_handler(CommandHandler("clear", clear_handler))
     app.add_handler(CommandHandler("status", status_handler))
     app.add_handler(CommandHandler("cancel", cancel_handler))
+    app.add_handler(CommandHandler("resume", resume_handler))
 
     # Callback query handler for tool approval buttons
     app.add_handler(CallbackQueryHandler(callback_query_handler))
@@ -1564,6 +1695,7 @@ async def run_bot(config: Config, db: aiosqlite.Connection) -> None:
         BotCommand("clear", "Start a fresh session"),
         BotCommand("status", "Show current context, session, and state"),
         BotCommand("cancel", "Abort running Claude invocation"),
+        BotCommand("resume", "List and resume a previous session"),
     ])
     await app.start()
     await app.updater.start_polling()
