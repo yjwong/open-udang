@@ -262,10 +262,16 @@ export function useSwipe({
     touchPreventSetup.current = true;
 
     const onTouchStart = (e: TouchEvent) => {
+      // Allow native touch handling inside scrollable areas so the
+      // browser can perform native scrolling on .hunk-card-body.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".hunk-card-body")) return;
       e.preventDefault();
     };
 
     const onTouchMove = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".hunk-card-body")) return;
       e.preventDefault();
     };
 
