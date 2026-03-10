@@ -239,7 +239,7 @@ export function SwipeDeck({
             {...bind()}
             ref={cardRef}
             className="swipe-card swipe-card-current"
-            style={{ touchAction: "pan-y" }}
+            style={{ touchAction: "none" }}
           >
             {/* Swipe direction overlays */}
             <div

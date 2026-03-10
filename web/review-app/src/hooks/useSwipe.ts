@@ -89,7 +89,7 @@ export function useSwipe({
   const startedInScrollableRef = useRef(false);
 
   const bind = useDrag(
-    ({ down, movement: [mx, my], velocity: [vx, vy], cancel, first, event }) => {
+    ({ down, movement: [mx, my], velocity: [vx, vy], cancel, first, last, event }) => {
       if (!enabled || isAnimatingRef.current) {
         cancel();
         return;
@@ -114,8 +114,10 @@ export function useSwipe({
       }
 
       // If the drag started in a scrollable area and the user is dragging
-      // vertically, cancel the gesture so the browser can scroll instead
+      // vertically, cancel the gesture so the browser can scroll instead.
+      // Reset the card transform before cancelling so it doesn't get stuck.
       if (startedInScrollableRef.current && lockedAxisRef.current === "y") {
+        el.style.transform = "translate3d(0, 0, 0)";
         cancel();
         return;
       }
@@ -125,7 +127,7 @@ export function useSwipe({
       // Only allow downward movement
       const clampedMy = effectiveMy > 0 ? effectiveMy : 0;
 
-      if (down) {
+      if (down && !last) {
         const rotation = effectiveMx * 0.05;
         el.style.transform = `translate3d(${effectiveMx}px, ${clampedMy}px, 0) rotate(${rotation}deg)`;
         return;
@@ -203,13 +205,21 @@ export function useSwipe({
             y: direction === "down" ? vh * EXIT_DISTANCE : 0,
           };
 
+          // @use-gesture v10 reports velocity as absolute values,
+          // so we need to sign it based on swipe direction to avoid
+          // the exit animation fighting the target direction.
+          const signedVx =
+            direction === "left" ? -vx * 100 :
+            direction === "right" ? vx * 100 : 0;
+          const signedVy = direction === "down" ? vy * 100 : 0;
+
           cancelAnimRef.current = animateSpring(
             exitEl,
             {
               x: effectiveMx,
               y: clampedMy,
-              vx: direction === "down" ? 0 : vx * 100,
-              vy: direction === "down" ? vy * 100 : 0,
+              vx: signedVx,
+              vy: signedVy,
             },
             target,
             () => {
