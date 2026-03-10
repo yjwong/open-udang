@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Frontend
+node_modules/
+
 # Secrets
 config.yaml
 .env

@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from open_udang.config import Config
 from open_udang.db import get_active_context
@@ -329,12 +331,28 @@ def create_review_app(config: Config, db: aiosqlite.Connection) -> Starlette:
     """Create the Starlette application for the review API.
 
     The config and db are stored on app.state so route handlers can access them.
+    Serves the review Mini App frontend at /app/ and API routes at /api/review/.
     """
-    routes = [
+    # Resolve the frontend dist directory relative to this package.
+    _dist_dir = Path(__file__).resolve().parent.parent.parent.parent / "web" / "review-app" / "dist"
+
+    routes: list[Route | Mount] = [
         Route("/api/review/hunks", hunks_endpoint, methods=["GET"]),
         Route("/api/review/stage", stage_endpoint, methods=["POST"]),
         Route("/api/review/unstage", unstage_endpoint, methods=["POST"]),
     ]
+
+    if _dist_dir.is_dir():
+        routes.append(
+            Mount("/app", app=StaticFiles(directory=str(_dist_dir), html=True), name="review-app")
+        )
+        logger.info("Serving review Mini App from %s", _dist_dir)
+    else:
+        logger.warning(
+            "Review Mini App dist directory not found at %s — "
+            "run 'npm run build' in web/review-app/ to build the frontend",
+            _dist_dir,
+        )
 
     app = Starlette(routes=routes)
     app.state.config = config
