@@ -1,6 +1,5 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo } from "react";
 import { useHunks } from "./hooks/useHunks";
-import { initShiki } from "./lib/shiki";
 import { SwipeDeck } from "./components/SwipeDeck";
 
 function getChatId(): string | null {
@@ -11,31 +10,11 @@ function getChatId(): string | null {
 export default function App() {
   const chatId = useMemo(() => getChatId(), []);
   const { hunks, totalHunks, loading, error, refresh } = useHunks(chatId);
-  const [shikiReady, setShikiReady] = useState(false);
-  const [shikiError, setShikiError] = useState<string | null>(null);
 
-  useEffect(() => {
-    initShiki()
-      .then(() => setShikiReady(true))
-      .catch((err) =>
-        setShikiError(
-          err instanceof Error ? err.message : "Failed to load syntax highlighter",
-        ),
-      );
-  }, []);
-
-  if (loading || !shikiReady) {
+  if (loading) {
     return (
       <div className="loading">
         <div className="spinner" />
-      </div>
-    );
-  }
-
-  if (shikiError) {
-    return (
-      <div className="error-container">
-        <p>Syntax highlighter failed to load: {shikiError}</p>
       </div>
     );
   }
