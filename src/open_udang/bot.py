@@ -891,6 +891,7 @@ async def _start_agent_task(
                 context=ctx_config,
                 session_id=session_id,
                 callback_context=cb_ctx,
+                bot=context.bot,
             )
 
             events = query_and_stream(session, actual_prompt)

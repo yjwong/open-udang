@@ -24,6 +24,8 @@ from claude_agent_sdk import (
     SystemMessage,
 )
 
+from telegram import Bot
+
 from open_udang.agent import AgentEvent
 from open_udang.config import ContextConfig
 from open_udang.hooks import (
@@ -31,6 +33,7 @@ from open_udang.hooks import (
     EditNotifyCallback,
     QuestionCallback,
 )
+from open_udang.tools import create_openudang_mcp_server
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,7 @@ async def get_or_create_session(
     context: ContextConfig,
     session_id: str | None,
     callback_context: CallbackContext,
+    bot: Bot | None = None,
 ) -> AgentSession:
     """Return an existing live session or create a new one.
 
@@ -124,10 +128,15 @@ async def get_or_create_session(
     def _log_stderr(line: str) -> None:
         logger.info("CLI stderr: %s", line.rstrip())
 
+    # Auto-approve the built-in OpenUdang MCP tools (send_file, send_photo)
+    # alongside whatever the user configured.
+    allowed_tools = list(context.allowed_tools or [])
+    allowed_tools.append("mcp__openudang__send_file")
+
     options = ClaudeAgentOptions(
         cwd=context.directory,
         model=context.model,
-        allowed_tools=context.allowed_tools,
+        allowed_tools=allowed_tools,
         add_dirs=context.additional_directories,
         setting_sources=["project", "user", "local"],
         include_partial_messages=True,
@@ -142,6 +151,12 @@ async def get_or_create_session(
             "directories:\n" + dirs_list + "\n"
             "You may read and search files in these directories as needed."
         )
+
+    # Register in-process MCP tools (send_file, send_photo, etc.) so the
+    # agent can send files directly to the Telegram chat.
+    if bot is not None:
+        openudang_server = create_openudang_mcp_server(bot=bot, chat_id=chat_id)
+        options.mcp_servers = {"openudang": openudang_server}
 
     if session_id:
         options.resume = session_id

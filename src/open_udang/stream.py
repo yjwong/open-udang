@@ -241,6 +241,13 @@ def _extract_tool_summary(
         if questions:
             return questions[0].get("header", questions[0].get("question", ""))[:60]
         return "asking user"
+    if tool_name == "mcp__openudang__send_file":
+        path = tool_input.get("file_path", "")
+        basename = os.path.basename(path) if path else ""
+        caption = tool_input.get("caption", "")
+        if caption:
+            return f"{basename} — {caption[:40]}"
+        return basename
     # Generic: show first key's value
     for key, val in tool_input.items():
         if isinstance(val, str):
