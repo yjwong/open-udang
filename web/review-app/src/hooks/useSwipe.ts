@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { useDrag } from "@use-gesture/react";
 
 export type SwipeDirection = "left" | "right" | "down" | null;
@@ -87,19 +87,23 @@ export function useSwipe({
   const lockedAxisRef = useRef<"x" | "y" | null>(null);
   const cancelAnimRef = useRef<(() => void) | null>(null);
   const startedInScrollableRef = useRef(false);
+  const scrollLastYRef = useRef<number | null>(null);
 
   const bind = useDrag(
     ({ down, movement: [mx, my], velocity: [vx, vy], cancel, first, last, event }) => {
+      const el = cardRef.current;
+      if (!el) return;
+
       if (!enabled || isAnimatingRef.current) {
+        // Reset card position so it doesn't get stuck mid-drag
+        el.style.transform = "translate3d(0, 0, 0)";
         cancel();
         return;
       }
 
-      const el = cardRef.current;
-      if (!el) return;
-
       if (first) {
         lockedAxisRef.current = null;
+        scrollLastYRef.current = null;
         // Check if the drag started inside a scrollable area (e.g. .hunk-card-body)
         // If so, suppress vertical swipe to allow native scrolling
         const target = event?.target as HTMLElement | null;
@@ -114,11 +118,17 @@ export function useSwipe({
       }
 
       // If the drag started in a scrollable area and the user is dragging
-      // vertically, cancel the gesture so the browser can scroll instead.
-      // Reset the card transform before cancelling so it doesn't get stuck.
+      // vertically, scroll the card body programmatically (since touch-action:none
+      // on descendants prevents native scrolling).
       if (startedInScrollableRef.current && lockedAxisRef.current === "y") {
-        el.style.transform = "translate3d(0, 0, 0)";
-        cancel();
+        const scrollBody = el.querySelector(".hunk-card-body") as HTMLElement | null;
+        if (scrollBody) {
+          scrollBody.scrollTop -= my - (scrollLastYRef.current ?? 0);
+          scrollLastYRef.current = my;
+        }
+        if (last) {
+          scrollLastYRef.current = null;
+        }
         return;
       }
 
@@ -236,9 +246,34 @@ export function useSwipe({
     },
     {
       filterTaps: true,
-      pointer: { touch: true },
+      pointer: { touch: true, capture: false },
     },
   );
+
+  // Prevent the browser from claiming touch events for its own gestures
+  // (e.g. scroll, back-navigation in Telegram WebView). Uses a ref guard
+  // so listeners are attached exactly once and never torn down by React
+  // re-renders — a teardown gap would let the browser reclaim the touch.
+  const touchPreventSetup = useRef(false);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || touchPreventSetup.current) return;
+    touchPreventSetup.current = true;
+
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+
+    // Non-passive + capture phase so we intercept before anything else.
+    // Never torn down — intentionally permanent for the element's lifetime.
+    el.addEventListener("touchstart", onTouchStart, { passive: false, capture: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+  });
 
   const cleanup = useCallback(() => {
     if (cancelAnimRef.current) {

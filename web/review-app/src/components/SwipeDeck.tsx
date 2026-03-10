@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Hunk } from "../lib/types";
 import { stageHunk, unstageHunk, StaleHunkError } from "../lib/api";
 import { HunkCard } from "./HunkCard";
@@ -33,8 +33,13 @@ export function SwipeDeck({
   const [isProcessing, setIsProcessing] = useState(false);
   const swipeEnabled = !isProcessing;
 
-  // Track swipe direction for overlay
-  const [dragDirection, setDragDirection] = useState<"left" | "right" | "down" | null>(null);
+  // Track swipe direction for overlay — use refs + direct DOM updates
+  // to avoid React re-renders during drag (which would cause @use-gesture
+  // to tear down and re-bind, killing the active gesture).
+  const overlayRightRef = useRef<HTMLDivElement | null>(null);
+  const overlayLeftRef = useRef<HTMLDivElement | null>(null);
+  const overlayDownRef = useRef<HTMLDivElement | null>(null);
+  const dragDirectionRef = useRef<"left" | "right" | "down" | null>(null);
 
   const currentHunk = hunks[currentIndex] ?? null;
   const nextHunk = hunks[currentIndex + 1] ?? null;
@@ -147,7 +152,10 @@ export function SwipeDeck({
 
   // When swipe threshold is reached, clear the drag overlay immediately
   const handleSwipeThreshold = useCallback((_direction: SwipeDirection) => {
-    setDragDirection(null);
+    dragDirectionRef.current = null;
+    overlayRightRef.current?.classList.remove("active");
+    overlayLeftRef.current?.classList.remove("active");
+    overlayDownRef.current?.classList.remove("active");
   }, []);
 
   const { bind, cardRef, exitingRef } = useSwipe({
@@ -156,7 +164,9 @@ export function SwipeDeck({
     enabled: swipeEnabled && !isComplete,
   });
 
-  // Track drag for overlay — listen to style changes on the card
+  // Track drag for overlay — listen to style changes on the card.
+  // Uses direct DOM manipulation instead of React state to avoid
+  // re-renders that would kill the @use-gesture drag session.
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return;
@@ -166,19 +176,24 @@ export function SwipeDeck({
       const match = transform.match(
         /translate3d\(([^,]+)px,\s*([^,]+)px/,
       );
-      if (!match) {
-        setDragDirection(null);
-        return;
-      }
-      const x = parseFloat(match[1]!);
-      const y = parseFloat(match[2]!);
 
-      if (Math.abs(x) > 20) {
-        setDragDirection(x > 0 ? "right" : "left");
-      } else if (y > 20) {
-        setDragDirection("down");
-      } else {
-        setDragDirection(null);
+      let newDir: "left" | "right" | "down" | null = null;
+      if (match) {
+        const x = parseFloat(match[1]!);
+        const y = parseFloat(match[2]!);
+        if (Math.abs(x) > 20) {
+          newDir = x > 0 ? "right" : "left";
+        } else if (y > 20) {
+          newDir = "down";
+        }
+      }
+
+      if (newDir !== dragDirectionRef.current) {
+        dragDirectionRef.current = newDir;
+        // Update overlay classes directly
+        overlayRightRef.current?.classList.toggle("active", newDir === "right");
+        overlayLeftRef.current?.classList.toggle("active", newDir === "left");
+        overlayDownRef.current?.classList.toggle("active", newDir === "down");
       }
     });
 
@@ -241,19 +256,22 @@ export function SwipeDeck({
             className="swipe-card swipe-card-current"
             style={{ touchAction: "none" }}
           >
-            {/* Swipe direction overlays */}
+            {/* Swipe direction overlays — classes toggled via refs, not state */}
             <div
-              className={`swipe-overlay swipe-overlay-right${dragDirection === "right" ? " active" : ""}`}
+              ref={overlayRightRef}
+              className="swipe-overlay swipe-overlay-right"
             >
               Stage
             </div>
             <div
-              className={`swipe-overlay swipe-overlay-left${dragDirection === "left" ? " active" : ""}`}
+              ref={overlayLeftRef}
+              className="swipe-overlay swipe-overlay-left"
             >
               Skip
             </div>
             <div
-              className={`swipe-overlay swipe-overlay-down${dragDirection === "down" ? " active" : ""}`}
+              ref={overlayDownRef}
+              className="swipe-overlay swipe-overlay-down"
             >
               Undo
             </div>

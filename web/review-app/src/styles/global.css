@@ -204,6 +204,11 @@ body {
 .swipe-card-current {
   z-index: 2;
   will-change: transform;
+  touch-action: none;
+}
+
+.swipe-card-current * {
+  touch-action: none;
 }
 
 .swipe-card-next {
