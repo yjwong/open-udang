@@ -11,13 +11,15 @@ interface SpringState {
 }
 
 interface UseSwipeOptions {
-  onSwipe: (direction: SwipeDirection) => void;
+  onSwipe: (direction: SwipeDirection) => void | Promise<void>;
+  onSwipeThreshold?: (direction: SwipeDirection) => void;
   enabled?: boolean;
 }
 
 interface UseSwipeResult {
   bind: ReturnType<typeof useDrag>;
   cardRef: React.RefObject<HTMLDivElement | null>;
+  exitingRef: React.RefObject<HTMLDivElement | null>;
   isAnimating: boolean;
 }
 
@@ -74,14 +76,20 @@ function animateSpring(
   return () => cancelAnimationFrame(raf);
 }
 
-export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipeResult {
+export function useSwipe({
+  onSwipe,
+  onSwipeThreshold,
+  enabled = true,
+}: UseSwipeOptions): UseSwipeResult {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const exitingRef = useRef<HTMLDivElement | null>(null);
   const isAnimatingRef = useRef(false);
   const lockedAxisRef = useRef<"x" | "y" | null>(null);
   const cancelAnimRef = useRef<(() => void) | null>(null);
+  const startedInScrollableRef = useRef(false);
 
   const bind = useDrag(
-    ({ down, movement: [mx, my], velocity: [vx, vy], cancel, first }) => {
+    ({ down, movement: [mx, my], velocity: [vx, vy], cancel, first, event }) => {
       if (!enabled || isAnimatingRef.current) {
         cancel();
         return;
@@ -92,6 +100,10 @@ export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipe
 
       if (first) {
         lockedAxisRef.current = null;
+        // Check if the drag started inside a scrollable area (e.g. .hunk-card-body)
+        // If so, suppress vertical swipe to allow native scrolling
+        const target = event?.target as HTMLElement | null;
+        startedInScrollableRef.current = !!target?.closest(".hunk-card-body");
       }
 
       // Axis locking
@@ -99,6 +111,13 @@ export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipe
         if (Math.abs(mx) > AXIS_LOCK_PX || Math.abs(my) > AXIS_LOCK_PX) {
           lockedAxisRef.current = Math.abs(mx) > Math.abs(my) ? "x" : "y";
         }
+      }
+
+      // If the drag started in a scrollable area and the user is dragging
+      // vertically, cancel the gesture so the browser can scroll instead
+      if (startedInScrollableRef.current && lockedAxisRef.current === "y") {
+        cancel();
+        return;
       }
 
       const effectiveMx = lockedAxisRef.current === "y" ? 0 : mx;
@@ -119,9 +138,9 @@ export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipe
       let direction: SwipeDirection = null;
 
       if (lockedAxisRef.current === "x" || lockedAxisRef.current === null) {
-        if (effectiveMx > vw * SWIPE_X_THRESHOLD || vx > VELOCITY_THRESHOLD) {
+        if (effectiveMx > vw * SWIPE_X_THRESHOLD || (vx > VELOCITY_THRESHOLD && effectiveMx > 0)) {
           direction = "right";
-        } else if (effectiveMx < -vw * SWIPE_X_THRESHOLD || vx > VELOCITY_THRESHOLD && effectiveMx < 0) {
+        } else if (effectiveMx < -vw * SWIPE_X_THRESHOLD || (vx > VELOCITY_THRESHOLD && effectiveMx < 0)) {
           direction = "left";
         }
       }
@@ -148,31 +167,61 @@ export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipe
           },
         );
       } else {
-        // Animate off-screen
-        const target = {
-          x:
-            direction === "right"
-              ? vw * EXIT_DISTANCE
-              : direction === "left"
-                ? -vw * EXIT_DISTANCE
-                : 0,
-          y: direction === "down" ? vh * EXIT_DISTANCE : 0,
-        };
+        // Animate off-screen using the exiting layer.
+        // 1. Copy the current card's innerHTML into the exiting element
+        // 2. Position the exiting element where the card currently is
+        // 3. Reset the real card immediately (it will show next card content)
+        // 4. Animate the exiting element off-screen
+        const exitEl = exitingRef.current;
 
-        cancelAnimRef.current = animateSpring(
-          el,
-          { x: effectiveMx, y: clampedMy, vx: direction === "down" ? 0 : vx * 100, vy: direction === "down" ? vy * 100 : 0 },
-          target,
-          () => {
-            isAnimatingRef.current = false;
-            onSwipe(direction);
+        if (exitEl) {
+          // Clone current card content into the exiting layer
+          exitEl.innerHTML = el.innerHTML;
+          exitEl.style.transform = `translate3d(${effectiveMx}px, ${clampedMy}px, 0) rotate(${effectiveMx * 0.05}deg)`;
+          exitEl.style.display = "block";
+        }
 
-            // Reset position for next card
-            if (el) {
-              el.style.transform = "translate3d(0, 0, 0)";
-            }
-          },
-        );
+        // Reset the real card immediately — no flash because the exiting
+        // layer is on top, visually covering the transition
+        el.style.transform = "translate3d(0, 0, 0)";
+
+        // Notify threshold reached so SwipeDeck can advance immediately
+        onSwipeThreshold?.(direction);
+
+        // Fire the swipe callback (advances index, does API calls)
+        // This is intentionally not awaited — the exit animation is cosmetic
+        void onSwipe(direction);
+
+        if (exitEl) {
+          const target = {
+            x:
+              direction === "right"
+                ? vw * EXIT_DISTANCE
+                : direction === "left"
+                  ? -vw * EXIT_DISTANCE
+                  : 0,
+            y: direction === "down" ? vh * EXIT_DISTANCE : 0,
+          };
+
+          cancelAnimRef.current = animateSpring(
+            exitEl,
+            {
+              x: effectiveMx,
+              y: clampedMy,
+              vx: direction === "down" ? 0 : vx * 100,
+              vy: direction === "down" ? vy * 100 : 0,
+            },
+            target,
+            () => {
+              exitEl.style.display = "none";
+              exitEl.innerHTML = "";
+              isAnimatingRef.current = false;
+            },
+          );
+        } else {
+          // No exiting element — just finish
+          isAnimatingRef.current = false;
+        }
       }
     },
     {
@@ -194,6 +243,7 @@ export function useSwipe({ onSwipe, enabled = true }: UseSwipeOptions): UseSwipe
   return {
     bind,
     cardRef,
+    exitingRef,
     isAnimating: isAnimatingRef.current,
   };
 }

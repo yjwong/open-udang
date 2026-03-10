@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { Hunk } from "../lib/types";
 import { stageHunk, unstageHunk, StaleHunkError } from "../lib/api";
 import { HunkCard } from "./HunkCard";
@@ -35,7 +35,6 @@ export function SwipeDeck({
 
   // Track swipe direction for overlay
   const [dragDirection, setDragDirection] = useState<"left" | "right" | "down" | null>(null);
-  const overlayRef = useRef<HTMLDivElement | null>(null);
 
   const currentHunk = hunks[currentIndex] ?? null;
   const nextHunk = hunks[currentIndex + 1] ?? null;
@@ -146,12 +145,18 @@ export function SwipeDeck({
     [currentHunk, history],
   );
 
-  const { bind, cardRef } = useSwipe({
+  // When swipe threshold is reached, clear the drag overlay immediately
+  const handleSwipeThreshold = useCallback((_direction: SwipeDirection) => {
+    setDragDirection(null);
+  }, []);
+
+  const { bind, cardRef, exitingRef } = useSwipe({
     onSwipe: handleSwipe,
+    onSwipeThreshold: handleSwipeThreshold,
     enabled: swipeEnabled && !isComplete,
   });
 
-  // Track drag for overlay — listen to pointer events on the card
+  // Track drag for overlay — listen to style changes on the card
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return;
@@ -232,12 +237,9 @@ export function SwipeDeck({
         {currentHunk && (
           <div
             {...bind()}
-            ref={(el) => {
-              cardRef.current = el;
-              overlayRef.current = el;
-            }}
+            ref={cardRef}
             className="swipe-card swipe-card-current"
-            style={{ touchAction: "none" }}
+            style={{ touchAction: "pan-y" }}
           >
             {/* Swipe direction overlays */}
             <div
@@ -258,6 +260,15 @@ export function SwipeDeck({
             <HunkCard hunk={currentHunk} />
           </div>
         )}
+
+        {/* Exiting card layer — used for the fly-off animation.
+            Content is cloned from the current card when a swipe is confirmed,
+            so the real card can immediately show the next hunk underneath. */}
+        <div
+          ref={exitingRef}
+          className="swipe-card swipe-card-exiting"
+          style={{ display: "none" }}
+        />
       </div>
     </div>
   );
