@@ -300,6 +300,11 @@ body {
   border: 2px solid var(--text-muted);
 }
 
+.swipe-overlay-unstage {
+  background: rgba(244, 67, 54, 0.9);
+  border-color: #f44336;
+}
+
 .swipe-overlay-down {
   left: 50%;
   transform: translateX(-50%);

@@ -334,13 +334,13 @@ export function SwipeDeck({
               ref={overlayRightRef}
               className="swipe-overlay swipe-overlay-right"
             >
-              Stage
+              {currentHunk.staged ? "Keep" : "Stage"}
             </div>
             <div
               ref={overlayLeftRef}
-              className="swipe-overlay swipe-overlay-left"
+              className={`swipe-overlay swipe-overlay-left${currentHunk.staged ? " swipe-overlay-unstage" : ""}`}
             >
-              Skip
+              {currentHunk.staged ? "Unstage" : "Skip"}
             </div>
             <div
               ref={overlayDownRef}
