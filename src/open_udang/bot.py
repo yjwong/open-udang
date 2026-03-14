@@ -389,8 +389,8 @@ async def context_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         locked = _get_locked_context(chat_id, config)
         if locked:
             ctx = config.contexts[locked]
-            escaped_name = locked.replace("_", "\\_")
-            escaped_desc = ctx.description.replace("_", "\\_").replace(".", "\\.")
+            escaped_name = _escape_mdv2(locked)
+            escaped_desc = _escape_mdv2(ctx.description)
             await message.reply_text(
                 f"This chat is locked to context `{escaped_name}` \\- {escaped_desc}",
                 parse_mode="MarkdownV2",
@@ -399,8 +399,8 @@ async def context_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             lines = ["*Available contexts:*\n"]
             for name, ctx in config.contexts.items():
                 marker = " \\(active\\)" if name == current else ""
-                escaped_name = name.replace("_", "\\_")
-                escaped_desc = ctx.description.replace("_", "\\_").replace(".", "\\.")
+                escaped_name = _escape_mdv2(name)
+                escaped_desc = _escape_mdv2(ctx.description)
                 lines.append(f"• `{escaped_name}` \\- {escaped_desc}{marker}")
             await message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
         return
@@ -430,9 +430,10 @@ async def context_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await set_active_context(db, chat_id, target)
     ctx = config.contexts[target]
-    desc = ctx.description.replace(".", "\\.").replace("-", "\\-")
+    desc = _escape_mdv2(ctx.description)
+    target_escaped = _escape_mdv2(target)
     await message.reply_text(
-        f"Switched to context `{target}` \\- {desc}",
+        f"Switched to context `{target_escaped}` \\- {desc}",
         parse_mode="MarkdownV2",
     )
     await _update_pinned_status(context.bot, chat_id, target, ctx, db)
