@@ -161,3 +161,21 @@ def load_config(path: str | None = None) -> Config:
     raw = yaml.safe_load(config_path.read_text())
     _validate_raw(raw)
     return _parse(raw)
+
+
+def write_config(config_path: Path, config_dict: dict[str, Any]) -> None:
+    """Write a config dictionary to a YAML file.
+
+    Creates parent directories if needed.
+
+    Args:
+        config_path: Path to write the config file.
+        config_dict: Config dictionary matching the expected YAML schema.
+
+    Raises:
+        OSError: If the file cannot be written.
+    """
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
+    )

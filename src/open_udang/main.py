@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 
 from open_udang.bot import run_bot
 from open_udang.config import DEFAULT_CONFIG_PATH, load_config
@@ -117,6 +118,26 @@ def main() -> None:
         logger.warning(
             "ANTHROPIC_API_KEY not set — will use Claude Code OAuth if available"
         )
+
+    # Offer guided setup when config is missing and running interactively.
+    config_path = Path(args.config)
+    if not config_path.exists():
+        if sys.stdin.isatty():
+            from open_udang.setup import run_setup_wizard
+
+            try:
+                run_setup_wizard(config_path)
+            except SystemExit:
+                return
+            # Config file now exists; fall through to normal startup.
+        else:
+            logger.error(
+                "Config file not found: %s — "
+                "run interactively to use the setup wizard, "
+                "or copy config.example.yaml and edit it manually.",
+                config_path,
+            )
+            sys.exit(1)
 
     try:
         asyncio.run(_async_main(args.config))
