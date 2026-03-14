@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build sdist
+        run: uv build --sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  build-binary:
+    name: Build binary (${{ matrix.target }})
+    needs: build-sdist
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: openudang-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: openudang-linux-aarch64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: openudang-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: openudang-macos-aarch64
+
+    steps:
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-pyapp-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-pyapp-
+
+      - name: Get sdist filename
+        id: sdist
+        run: echo "filename=$(ls dist/*.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Build with PyApp
+        env:
+          PYAPP_PROJECT_PATH: ${{ steps.sdist.outputs.filename }}
+          PYAPP_PYTHON_VERSION: "3.11"
+          PYAPP_EXEC_CODE: "from open_udang.main import main; main()"
+          PYAPP_DISTRIBUTION_EMBED: "1"
+        run: cargo install pyapp --force --root dist/pyapp
+
+      - name: Rename binary
+        run: mv dist/pyapp/bin/pyapp dist/${{ matrix.artifact }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/openudang-*
+            artifacts/*.tar.gz
