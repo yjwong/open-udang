@@ -62,6 +62,7 @@ src/open_udang/
     config.py         # Config loading and validation (YAML)
     db.py             # SQLite session ID mapping
     markdown.py       # GFM -> Telegram MarkdownV2 conversion
+    service.py        # install/uninstall as systemd/launchd service
 ```
 
 ## Config

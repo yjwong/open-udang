@@ -24,6 +24,25 @@ def _parse_args() -> argparse.Namespace:
         default=str(DEFAULT_CONFIG_PATH),
         help=f"Path to config file (default: {DEFAULT_CONFIG_PATH})",
     )
+
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    sub_install = subparsers.add_parser(
+        "install",
+        help="Install OpenUdang as a system service (systemd/launchd)",
+    )
+    sub_install.add_argument(
+        "--config",
+        dest="config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help=f"Path to config file (default: {DEFAULT_CONFIG_PATH})",
+    )
+
+    subparsers.add_parser(
+        "uninstall",
+        help="Remove the OpenUdang system service",
+    )
+
     return parser.parse_args()
 
 
@@ -113,6 +132,19 @@ def main() -> None:
     )
 
     args = _parse_args()
+
+    # Handle install/uninstall subcommands
+    if args.subcommand == "install":
+        from open_udang.service import install_service
+
+        install_service(args.config)
+        return
+
+    if args.subcommand == "uninstall":
+        from open_udang.service import uninstall_service
+
+        uninstall_service()
+        return
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         logger.warning(

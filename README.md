@@ -137,7 +137,22 @@ You can tap **"Accept all edits"** during a session to auto-approve subsequent E
 
 ## Deployment
 
-Run as a systemd user service for a persistent setup:
+The easiest way to deploy is with the built-in install command:
+
+```bash
+# Install as a systemd user service (Linux) or launchd agent (macOS)
+openudang install
+
+# Remove the service
+openudang uninstall
+```
+
+This auto-detects your platform, finds the executable path, and sets everything up — including enabling lingering on Linux so the service runs without an active login session.
+
+<details>
+<summary>Manual setup</summary>
+
+If you prefer to set up the service manually:
 
 ```ini
 # ~/.config/systemd/user/open-udang.service
@@ -156,6 +171,8 @@ WantedBy=default.target
 ```bash
 systemctl --user enable --now open-udang
 ```
+
+</details>
 
 ## License
 
