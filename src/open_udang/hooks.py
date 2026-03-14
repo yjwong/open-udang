@@ -22,6 +22,7 @@ handled here instead.
 
 import logging
 import os
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -233,7 +234,14 @@ def make_can_use_tool(
                 )
 
         logger.info("Requesting approval for tool: %s", tool_name)
-        approved = await request_approval(tool_name, tool_input, "")
+        # Generate a unique tool_use_id so that parallel approval requests
+        # each get their own Future in _approval_futures (keyed by this id).
+        # The SDK's canUseTool callback does not provide a tool_use_id, so
+        # without this, concurrent approvals would collide on the same
+        # dict key ("approve:", "deny:") causing the second future to
+        # overwrite the first — resulting in a hang / "expired" error.
+        tool_use_id = uuid.uuid4().hex[:12]
+        approved = await request_approval(tool_name, tool_input, tool_use_id)
         decision = "allow" if approved else "deny"
         logger.info("Tool %s %s", tool_name, decision)
 
