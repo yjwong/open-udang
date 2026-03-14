@@ -56,6 +56,22 @@ async def _async_main(config_path: str) -> None:
 
     db = await init_db()
 
+    # Start tunnel if configured (before the bot, so public_url is ready).
+    tunnel_proc = None
+    if config.review.tunnel == "cloudflared" and not config.review.public_url:
+        from open_udang.tunnel import start_tunnel
+
+        try:
+            tunnel_proc, tunnel_url = await start_tunnel(config.review.port)
+            config.review.public_url = tunnel_url
+            logger.info("Tunnel URL set as public_url: %s", tunnel_url)
+        except RuntimeError as e:
+            logger.error("Failed to start tunnel: %s", e)
+            logger.error(
+                "The review app will not be accessible externally. "
+                "Set review.public_url manually or fix the tunnel issue."
+            )
+
     # Set up graceful shutdown
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -76,6 +92,12 @@ async def _async_main(config_path: str) -> None:
             await task
         except asyncio.CancelledError:
             pass
+
+    # Stop the tunnel if we started one.
+    if tunnel_proc is not None:
+        from open_udang.tunnel import stop_tunnel
+
+        await stop_tunnel(tunnel_proc)
 
     await db.close()
     logger.info("Shutdown complete")

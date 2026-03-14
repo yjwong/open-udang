@@ -52,3 +52,7 @@ default_context: default
 #   host: "127.0.0.1"   # HTTP server bind address
 #   port: 8080           # HTTP server port
 #   public_url: "https://your-domain.com"  # Public URL for Mini App (behind reverse proxy)
+#   tunnel: cloudflared  # Auto-start a cloudflared quick tunnel (free, no account needed)
+#                        # Downloads cloudflared automatically if not installed.
+#                        # Sets public_url from the assigned trycloudflare.com URL.
+#                        # Ignored if public_url is already set.

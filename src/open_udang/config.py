@@ -31,6 +31,7 @@ class ReviewConfig:
     host: str = "127.0.0.1"
     port: int = 8080
     public_url: str | None = None
+    tunnel: str | None = None  # "cloudflared" or None
 
 
 @dataclass
@@ -116,10 +117,18 @@ def _parse(raw: dict) -> Config:
 
     # Parse optional review config.
     review_raw: dict[str, Any] = raw.get("review", {})
+    tunnel_raw = review_raw.get("tunnel")
+    if tunnel_raw is not None and tunnel_raw not in ("cloudflared",):
+        raise ValueError(
+            f"Unsupported review.tunnel value: {tunnel_raw!r} "
+            f"(supported: 'cloudflared')"
+        )
+
     review = ReviewConfig(
         host=str(review_raw.get("host", "127.0.0.1")),
         port=int(review_raw.get("port", 8080)),
         public_url=review_raw.get("public_url"),
+        tunnel=tunnel_raw,
     )
 
     return Config(
