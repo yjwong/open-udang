@@ -149,6 +149,43 @@ body {
   transition: width 0.3s ease;
 }
 
+/* --- Swipe Deck Toolbar --- */
+
+.swipe-deck-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  flex-shrink: 0;
+}
+
+.swipe-deck-toolbar .progress-bar-container {
+  flex: 1;
+}
+
+.skip-to-unstaged-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--text-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.skip-to-unstaged-btn:active {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.skip-to-unstaged-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* --- Swipe Deck --- */
 
 .swipe-deck {

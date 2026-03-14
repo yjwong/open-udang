@@ -205,6 +205,63 @@ export function SwipeDeck({
     return () => observer.disconnect();
   }, [cardRef, currentIndex]);
 
+  const pendingSkipRef = useRef(false);
+
+  const skipToFirstUnstaged = useCallback(
+    (fromIndex: number) => {
+      for (let i = fromIndex; i < hunks.length; i++) {
+        if (!hunks[i]!.staged) {
+          if (i !== fromIndex) {
+            const newDecisions: Decision[] = [];
+            for (let j = fromIndex; j < i; j++) {
+              newDecisions.push({
+                hunkId: hunks[j]!.id,
+                action: "skipped",
+                wasAlreadyStaged: hunks[j]!.staged,
+              });
+              setSkippedCount((c) => c + 1);
+            }
+            setHistory((h) => [...h, ...newDecisions]);
+            setCurrentIndex(i);
+          }
+          return true;
+        }
+      }
+      return false;
+    },
+    [hunks],
+  );
+
+  const handleSkipToUnstaged = useCallback(() => {
+    if (skipToFirstUnstaged(currentIndex)) {
+      pendingSkipRef.current = false;
+      return;
+    }
+    if (hunks.length < totalHunks && onNeedMore) {
+      pendingSkipRef.current = true;
+      onNeedMore();
+    }
+  }, [currentIndex, hunks.length, totalHunks, onNeedMore, skipToFirstUnstaged]);
+
+  useEffect(() => {
+    if (!pendingSkipRef.current) return;
+
+    if (skipToFirstUnstaged(currentIndex)) {
+      pendingSkipRef.current = false;
+    } else if (hunks.length < totalHunks && onNeedMore) {
+      onNeedMore();
+    } else {
+      pendingSkipRef.current = false;
+    }
+  }, [hunks.length, currentIndex, totalHunks, onNeedMore, skipToFirstUnstaged]);
+
+  const hasUnstagedAhead = hunks.some(
+    (h, i) => i >= currentIndex && !h.staged,
+  );
+  const currentIsUnstaged = currentHunk ? !currentHunk.staged : false;
+  const showSkipButton =
+    hasUnstagedAhead && !currentIsUnstaged && !isComplete;
+
   const handleRefresh = useCallback(() => {
     setCurrentIndex(0);
     setHistory([]);
@@ -235,7 +292,19 @@ export function SwipeDeck({
 
   return (
     <div className="swipe-deck">
-      <ProgressBar current={currentIndex} total={totalHunks} />
+      <div className="swipe-deck-toolbar">
+        <ProgressBar current={currentIndex} total={totalHunks} />
+        {showSkipButton && (
+          <button
+            className="skip-to-unstaged-btn"
+            onClick={handleSkipToUnstaged}
+            disabled={isProcessing}
+            title="Skip to first unstaged hunk"
+          >
+            Skip to unstaged ⏭
+          </button>
+        )}
+      </div>
 
       {error && (
         <div className="swipe-error">
