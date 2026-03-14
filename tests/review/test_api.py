@@ -241,7 +241,7 @@ async def test_get_hunks_pagination(transport) -> None:
 async def test_stage_hunk_success(transport) -> None:
     """Staging a cached hunk returns success."""
     hunk = _make_hunk()
-    _hunk_cache[(CHAT_ID, "default")] = [hunk]
+    _hunk_cache[(CHAT_ID, "default", 0)] = [hunk]
 
     with (
         patch("open_udang.review.api.stage_hunk", new_callable=AsyncMock) as mock_stage,
@@ -279,7 +279,7 @@ async def test_stage_hunk_not_found(transport) -> None:
 async def test_stage_hunk_stale(transport) -> None:
     """Staging a stale hunk returns 409 and invalidates cache."""
     hunk = _make_hunk()
-    _hunk_cache[(CHAT_ID, "default")] = [hunk]
+    _hunk_cache[(CHAT_ID, "default", 0)] = [hunk]
 
     with patch("open_udang.review.api.stage_hunk", new_callable=AsyncMock) as mock_stage:
         mock_stage.return_value = StageResult(ok=False, error="Hunk is stale", stale=True)
@@ -293,7 +293,7 @@ async def test_stage_hunk_stale(transport) -> None:
 
     assert resp.status_code == 409
     # Cache should be invalidated.
-    assert (CHAT_ID, "default") not in _hunk_cache
+    assert (CHAT_ID, "default", 0) not in _hunk_cache
 
 
 @pytest.mark.asyncio
@@ -327,7 +327,7 @@ async def test_stage_hunk_missing_hunk_id(transport) -> None:
 async def test_unstage_hunk_success(transport) -> None:
     """Unstaging a cached hunk returns success."""
     hunk = _make_hunk(staged=True)
-    _hunk_cache[(CHAT_ID, "default")] = [hunk]
+    _hunk_cache[(CHAT_ID, "default", 0)] = [hunk]
 
     with (
         patch("open_udang.review.api.unstage_hunk", new_callable=AsyncMock) as mock_unstage,
@@ -350,7 +350,7 @@ async def test_unstage_hunk_success(transport) -> None:
 async def test_unstage_hunk_stale(transport) -> None:
     """Unstaging a stale hunk returns 409."""
     hunk = _make_hunk(staged=True)
-    _hunk_cache[(CHAT_ID, "default")] = [hunk]
+    _hunk_cache[(CHAT_ID, "default", 0)] = [hunk]
 
     with patch("open_udang.review.api.unstage_hunk", new_callable=AsyncMock) as mock_unstage:
         mock_unstage.return_value = StageResult(ok=False, error="Hunk is stale", stale=True)
@@ -363,7 +363,7 @@ async def test_unstage_hunk_stale(transport) -> None:
             )
 
     assert resp.status_code == 409
-    assert (CHAT_ID, "default") not in _hunk_cache
+    assert (CHAT_ID, "default", 0) not in _hunk_cache
 
 
 @pytest.mark.asyncio
@@ -399,15 +399,15 @@ async def test_hunks_endpoint_populates_cache(transport) -> None:
                 headers=_auth_header(),
             )
 
-    assert (CHAT_ID, "default") in _hunk_cache
-    assert len(_hunk_cache[(CHAT_ID, "default")]) == 1
+    assert (CHAT_ID, "default", 0) in _hunk_cache
+    assert len(_hunk_cache[(CHAT_ID, "default", 0)]) == 1
 
 
 @pytest.mark.asyncio
 async def test_stage_without_chat_id_searches_all_cache(transport) -> None:
     """Stage request without chat_id searches entire cache."""
     hunk = _make_hunk()
-    _hunk_cache[(CHAT_ID, "default")] = [hunk]
+    _hunk_cache[(CHAT_ID, "default", 0)] = [hunk]
 
     updated_result = _make_hunk_result([_make_hunk(staged=True)])
 
