@@ -93,6 +93,7 @@ Key fields:
 | `/clear` | `clear_handler` | Fresh session in current context |
 | `/status` | `status_handler` | Current context, session, running state |
 | `/cancel` | `cancel_handler` | Abort running Claude invocation |
+| `/model` | `model_handler` | Show or override the model for this chat |
 | `/resume` | `resume_handler` | List and resume a previous session |
 
 ## Conventions

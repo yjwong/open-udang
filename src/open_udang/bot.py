@@ -96,6 +96,10 @@ _approval_tool_names: dict[str, str] = {}
 # Keyed by (chat_id, context_name).  Cleared on /clear or context switch.
 _edit_approved_sessions: set[tuple[int, str]] = set()
 
+# Per-chat model override: chat_id -> model name.  Set via /model command.
+# Cleared on /clear or context switch.  Takes precedence over context config.
+_model_overrides: dict[int, str] = {}
+
 # Media group batching: media_group_id -> list of messages received so far.
 # When Telegram sends an album (multiple photos), each photo arrives as a
 # separate Update sharing the same media_group_id.  We collect them here and
@@ -176,9 +180,18 @@ async def _get_context_name(chat_id: int, config: Config, db: aiosqlite.Connecti
 async def _get_context(
     chat_id: int, config: Config, db: aiosqlite.Connection
 ) -> tuple[str, ContextConfig]:
-    """Get context name and config for a chat."""
+    """Get context name and config for a chat.
+
+    If a per-chat model override is active (via ``/model``), returns a
+    shallow copy of the context config with the overridden model.
+    """
     name = await _get_context_name(chat_id, config, db)
-    return name, config.contexts[name]
+    ctx = config.contexts[name]
+    override = _model_overrides.get(chat_id)
+    if override:
+        from dataclasses import replace
+        ctx = replace(ctx, model=override)
+    return name, ctx
 
 
 def _is_authorized(user_id: int | None, config: Config) -> bool:
@@ -412,6 +425,7 @@ async def context_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     old_ctx_name = await _get_context_name(chat_id, config, db)
     _edit_approved_sessions.discard((chat_id, old_ctx_name))
+    _model_overrides.pop(chat_id, None)
     await close_session(chat_id)
 
     await set_active_context(db, chat_id, target)
@@ -441,6 +455,7 @@ async def clear_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await close_session(chat_id)
     await delete_session(db, chat_id, ctx_name)
     _edit_approved_sessions.discard((chat_id, ctx_name))
+    _model_overrides.pop(chat_id, None)
     await message.reply_text(f"Started fresh session in context `{ctx_name}`\\.", parse_mode="MarkdownV2")
     await _update_pinned_status(context.bot, chat_id, ctx_name, ctx, db)
 
@@ -463,7 +478,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lines = [
         f"*Context:* `{ctx_name}`",
         f"*Directory:* `{ctx.directory}`",
-        f"*Model:* `{ctx.model}`",
+        f"*Model:* `{ctx.model}`" + (" \\(override\\)" if chat_id in _model_overrides else ""),
         f"*Session:* {'`' + session_id[:12] + '...' + '`' if session_id else 'None'}",
         f"*Running:* {'Yes' if running else 'No'}",
         f"*Injectable:* {'Yes' if injectable else 'No'}",
@@ -499,6 +514,70 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text(text, parse_mode="MarkdownV2")
     else:
         await message.reply_text("Nothing running\\.", parse_mode="MarkdownV2")
+
+
+async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /model command: show or override the model for this chat.
+
+    Usage:
+        /model              — show current model (and override if active)
+        /model <name>       — override the model for this chat session
+        /model reset        — clear the override, revert to context default
+    """
+    config: Config = context.bot_data["config"]
+    db: aiosqlite.Connection = context.bot_data["db"]
+    message = update.effective_message
+    if not message or not _is_authorized(update.effective_user and update.effective_user.id, config):
+        return
+
+    chat_id = message.chat_id
+    ctx_name = await _get_context_name(chat_id, config, db)
+    ctx_default_model = config.contexts[ctx_name].model
+    current_override = _model_overrides.get(chat_id)
+    args = message.text.split() if message.text else []
+
+    if len(args) < 2:
+        # Show current model
+        if current_override:
+            text = (
+                f"*Model:* `{current_override}` \\(override\\)\n"
+                f"*Context default:* `{ctx_default_model}`\n\n"
+                f"Use `/model reset` to revert\\."
+            )
+        else:
+            text = f"*Model:* `{ctx_default_model}` \\(context default\\)"
+        for ch in ".-/":
+            text = text.replace(ch, f"\\{ch}")
+        await message.reply_text(text, parse_mode="MarkdownV2")
+        return
+
+    target = args[1]
+
+    if target == "reset":
+        if current_override:
+            del _model_overrides[chat_id]
+            await close_session(chat_id)
+            model_escaped = _escape_mdv2(ctx_default_model)
+            await message.reply_text(
+                f"Model override cleared\\. Using context default: `{model_escaped}`",
+                parse_mode="MarkdownV2",
+            )
+        else:
+            await message.reply_text(
+                "No model override active\\.",
+                parse_mode="MarkdownV2",
+            )
+        return
+
+    # Set override
+    _model_overrides[chat_id] = target
+    await close_session(chat_id)
+    model_escaped = _escape_mdv2(target)
+    await message.reply_text(
+        f"Model overridden to `{model_escaped}`\\. "
+        f"Use `/model reset` to revert\\.",
+        parse_mode="MarkdownV2",
+    )
 
 
 # Maximum number of sessions to show in /resume list.
@@ -1840,6 +1919,7 @@ def build_application(config: Config, db: aiosqlite.Connection) -> Application:
     app.add_handler(CommandHandler("status", status_handler))
     app.add_handler(CommandHandler("cancel", cancel_handler))
     app.add_handler(CommandHandler("resume", resume_handler))
+    app.add_handler(CommandHandler("model", model_handler))
     app.add_handler(CommandHandler("review", review_handler))
 
     # Callback query handler for tool approval buttons
@@ -1864,6 +1944,7 @@ async def run_bot(config: Config, db: aiosqlite.Connection) -> None:
         BotCommand("status", "Show current context, session, and state"),
         BotCommand("cancel", "Abort running Claude invocation"),
         BotCommand("resume", "List and resume a previous session"),
+        BotCommand("model", "Show or override the model for this chat"),
         BotCommand("review", "Review and stage git changes"),
     ])
     await app.start()
