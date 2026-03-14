@@ -112,6 +112,8 @@ ANTHROPIC_API_KEY=sk-ant-... ./openudang
 ANTHROPIC_API_KEY=sk-ant-... uv run openudang
 ```
 
+If no config file exists, OpenUdang starts an interactive setup wizard that walks you through creating one — no need to copy or edit YAML manually.
+
 Or deploy as a systemd service for always-on access — see [Deployment](#deployment).
 
 ## Commands

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
-from open_udang.setup import run_setup_wizard
+from open_udang.setup import _path_completer, _validate_directory, run_setup_wizard
 
 
 def _make_inputs(*responses: str):
@@ -178,6 +178,27 @@ class TestRunSetupWizard:
 
         assert config_path.exists()
 
+    def test_tilde_directory_accepted(self, tmp_path: Path) -> None:
+        """Tilde paths like ~/projects should be accepted and resolved."""
+        config_path = tmp_path / "config.yaml"
+        inputs = _make_inputs(
+            "111:AAA-bbb",  # token
+            "42",  # user ID
+            "default",  # context name
+            "~",  # directory (home dir, always exists)
+            "test",  # description
+            "1",  # model
+        )
+
+        with patch("builtins.input", side_effect=inputs):
+            run_setup_wizard(config_path)
+
+        raw = yaml.safe_load(config_path.read_text())
+        resolved = raw["contexts"]["default"]["directory"]
+        # Should be resolved to an absolute path, not contain ~
+        assert "~" not in resolved
+        assert Path(resolved).is_absolute()
+
     def test_config_roundtrips_through_load(self, tmp_path: Path) -> None:
         """The wizard-generated config should pass load_config validation."""
         from open_udang.config import load_config
@@ -199,3 +220,39 @@ class TestRunSetupWizard:
         assert config.telegram.token == "111:AAA-bbb"
         assert config.allowed_users == [42]
         assert config.default_context == "default"
+
+
+class TestPathCompleter:
+    """Tests for the readline path completer."""
+
+    def test_completes_existing_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "subdir").mkdir()
+        result = _path_completer(str(tmp_path) + "/sub", 0)
+        assert result is not None
+        assert "subdir/" in result
+
+    def test_returns_none_for_no_match(self, tmp_path: Path) -> None:
+        result = _path_completer(str(tmp_path) + "/nonexistent_xyz", 0)
+        assert result is None
+
+    def test_returns_none_past_end(self, tmp_path: Path) -> None:
+        (tmp_path / "only_one").mkdir()
+        # State 0 should return a match, state 1 should return None
+        assert _path_completer(str(tmp_path) + "/only_one", 0) is not None
+        assert _path_completer(str(tmp_path) + "/only_one", 1) is None
+
+    def test_tilde_completion(self) -> None:
+        """Tilde paths should be expanded for matching but kept in output."""
+        result = _path_completer("~/", 0)
+        # Home dir always has some contents, so first completion should work
+        assert result is not None
+
+
+class TestValidateDirectory:
+    """Tests for _validate_directory with tilde expansion."""
+
+    def test_tilde_is_expanded(self) -> None:
+        assert _validate_directory("~") is None
+
+    def test_nonexistent_path_rejected(self) -> None:
+        assert _validate_directory("/nonexistent/path/xyz") is not None

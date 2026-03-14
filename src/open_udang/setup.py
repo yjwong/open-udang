@@ -2,11 +2,30 @@
 
 from __future__ import annotations
 
+import glob as globmod
+import os
 import random
+import readline
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+
+def _path_completer(text: str, state: int) -> str | None:
+    """Readline completer for filesystem paths."""
+    # Expand ~ before globbing
+    expanded = os.path.expanduser(text)
+    # Add trailing wildcard for globbing, append * only if not already there
+    pattern = expanded + "*" if not expanded.endswith("*") else expanded
+    matches = globmod.glob(pattern)
+    # Append / to directories so the user can keep tabbing
+    matches = [m + "/" if os.path.isdir(m) else m for m in matches]
+    # If the original text started with ~, keep the ~ prefix in completions
+    if text.startswith("~") and not expanded.startswith("~"):
+        home = os.path.expanduser("~")
+        matches = ["~" + m[len(home):] if m.startswith(home) else m for m in matches]
+    return matches[state] if state < len(matches) else None
 
 
 _MODELS: tuple[tuple[str, str], ...] = (
@@ -110,10 +129,30 @@ def _prompt_context() -> tuple[str, dict[str, Any]]:
     Returns:
         A tuple of (context_name, context_dict) ready for the config YAML.
     """
-    print("\nSet up your first context (a project directory for Claude to work in).\n")
+    print("\nSet up your first context.")
+    print("A context is a named shortcut for a project. You'll use the name with")
+    print("/context to switch between projects in Telegram.\n")
 
-    name = _prompt("Context name", default="default", validator=_validate_context_name)
-    directory = _prompt("Project directory (absolute path)", validator=_validate_directory)
+    name = _prompt("Context name (e.g. my-project)", default="default", validator=_validate_context_name)
+
+    # Enable path completion for the directory prompt.
+    old_completer = readline.get_completer()
+    old_delims = readline.get_completer_delims()
+    readline.set_completer(_path_completer)
+    readline.set_completer_delims(" \t\n")
+    # libedit (macOS) uses different syntax from GNU readline (Linux).
+    if "libedit" in (readline.__doc__ or ""):
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
+    try:
+        directory = _prompt(
+            "Project directory (absolute path, tab to autocomplete)",
+            validator=_validate_directory,
+        )
+    finally:
+        readline.set_completer(old_completer)
+        readline.set_completer_delims(old_delims)
     description = _prompt("Short description", default="Default context")
 
     # Model selection
