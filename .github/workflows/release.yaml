@@ -67,7 +67,7 @@ jobs:
 
       - name: Get sdist filename
         id: sdist
-        run: echo "filename=$(ls dist/*.tar.gz)" >> "$GITHUB_OUTPUT"
+        run: echo "filename=$(realpath dist/*.tar.gz)" >> "$GITHUB_OUTPUT"
 
       - name: Build with PyApp
         env:
