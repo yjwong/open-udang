@@ -222,6 +222,18 @@ async def query_and_stream(
     """Send a query on an existing session and yield events."""
     logger.info("Sending query on live client: %s", prompt[:200])
     await session.client.query(prompt)
+    async for message in receive_events(session):
+        yield message
+
+
+async def receive_events(
+    session: AgentSession,
+) -> AsyncIterator[AgentEvent]:
+    """Yield events from an existing session without sending a new query.
+
+    Use this when ``session.client.query()`` has already been called
+    separately (e.g. for message-injection support).
+    """
     async for message in session.client.receive_response():
         if isinstance(message, SystemMessage):
             sid = getattr(message, "session_id", None)

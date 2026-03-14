@@ -31,12 +31,15 @@ from telegram.ext import (
 )
 
 from open_udang.agent import FileAttachment, cleanup_attachments, prepare_prompt
+from pathlib import Path
+
 from open_udang.client_manager import (
+    AgentSession,
     CallbackContext,
     close_all_sessions,
     close_session,
     get_or_create_session,
-    query_and_stream,
+    receive_events,
 )
 from open_udang.config import Config, ContextConfig
 from open_udang.db import (
@@ -63,9 +66,19 @@ logger = logging.getLogger(__name__)
 # Per-chat running asyncio task (for cancellation)
 _running_tasks: dict[int, asyncio.Task[Any]] = {}
 
-# Per-chat message queue: messages that arrive while the agent is busy.
-# Each entry is (prompt, attachments, config, db, context).
-_pending_queues: dict[int, list[tuple[str, list[FileAttachment], Config, aiosqlite.Connection, ContextTypes.DEFAULT_TYPE]]] = {}
+# Per-chat live session reference for message injection.
+# Set once get_or_create_session + initial query() completes inside _run(),
+# cleared in the finally block.
+_injectable_sessions: dict[int, AgentSession] = {}
+
+# Per-chat queue for messages that arrive during the brief setup phase
+# (before the session is ready for injection).  Drained immediately once
+# the session becomes injectable.
+_setup_queues: dict[int, list[tuple[str, list[FileAttachment]]]] = {}
+
+# Attachment temp-file paths created by injected messages.  Cleaned up in
+# _run()'s finally block after the agent has finished processing.
+_injected_attachment_paths: dict[int, list[Path]] = {}
 
 # Pending tool approval futures: callback_data -> asyncio.Future[bool]
 _approval_futures: dict[str, asyncio.Future[bool]] = {}
@@ -423,7 +436,8 @@ async def clear_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ctx_name, ctx = await _get_context(chat_id, config, db)
 
     await _cancel_running(chat_id)
-    _pending_queues.pop(chat_id, None)
+    _injectable_sessions.pop(chat_id, None)
+    _setup_queues.pop(chat_id, None)
     await close_session(chat_id)
     await delete_session(db, chat_id, ctx_name)
     _edit_approved_sessions.discard((chat_id, ctx_name))
@@ -443,7 +457,8 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ctx_name, ctx = await _get_context(chat_id, config, db)
     session_id = await get_session_id(db, chat_id, ctx_name)
     running = chat_id in _running_tasks and not _running_tasks[chat_id].done()
-    queued = len(_pending_queues.get(chat_id, []))
+    injectable = chat_id in _injectable_sessions
+    setup_queued = len(_setup_queues.get(chat_id, []))
 
     lines = [
         f"*Context:* `{ctx_name}`",
@@ -451,7 +466,8 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"*Model:* `{ctx.model}`",
         f"*Session:* {'`' + session_id[:12] + '...' + '`' if session_id else 'None'}",
         f"*Running:* {'Yes' if running else 'No'}",
-        f"*Queued:* {queued}",
+        f"*Injectable:* {'Yes' if injectable else 'No'}",
+        f"*Setup queued:* {setup_queued}",
     ]
     # Escape dots and dashes for MarkdownV2
     text = "\n".join(lines)
@@ -469,17 +485,16 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     chat_id = message.chat_id
     had_running = chat_id in _running_tasks and not _running_tasks[chat_id].done()
-    queued_count = len(_pending_queues.pop(chat_id, []))
+    setup_queued = len(_setup_queues.pop(chat_id, []))
 
     if had_running:
+        _injectable_sessions.pop(chat_id, None)
         await _cancel_running(chat_id)
 
-    if had_running or queued_count:
-        parts = []
-        if had_running:
-            parts.append("Cancelled running task")
-        if queued_count:
-            parts.append(f"cleared {queued_count} queued message{'s' if queued_count != 1 else ''}")
+    if had_running:
+        parts = ["Cancelled running task"]
+        if setup_queued:
+            parts.append(f"cleared {setup_queued} queued message{'s' if setup_queued != 1 else ''}")
         text = "\\. ".join(parts) + "\\."
         await message.reply_text(text, parse_mode="MarkdownV2")
     else:
@@ -804,28 +819,81 @@ async def _dispatch_to_agent(
     db: aiosqlite.Connection,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """Queue a message for the agent.  If no task is running, start one
-    immediately.  Otherwise enqueue the message and notify the user."""
-    # If a task is already running, queue and return
-    if chat_id in _running_tasks and not _running_tasks[chat_id].done():
-        if chat_id not in _pending_queues:
-            _pending_queues[chat_id] = []
-        _pending_queues[chat_id].append((prompt, attachments, config, db, context))
-        queue_len = len(_pending_queues[chat_id])
+    """Dispatch a message to the agent.
+
+    If no task is running, start one.  If a task *is* running and the
+    session is already live, inject the message directly via
+    ``session.client.query()`` so it is processed at the next tool-call
+    boundary (matching Claude Code's behavior).  If the session is still
+    being set up, queue the message for injection once the session is
+    ready.
+    """
+    # No task running — start a new one.
+    if chat_id not in _running_tasks or _running_tasks[chat_id].done():
+        await _start_agent_task(prompt, attachments, chat_id, config, db, context)
+        return
+
+    # Task is running — try to inject into the live session.
+    session = _injectable_sessions.get(chat_id)
+    if session is not None:
+        await _inject_message(session, prompt, attachments, chat_id, context.bot)
+    else:
+        # Session is still being set up — queue for injection once ready.
+        if chat_id not in _setup_queues:
+            _setup_queues[chat_id] = []
+        _setup_queues[chat_id].append((prompt, attachments))
         logger.info(
-            "Queued message for chat %d (queue depth: %d)", chat_id, queue_len
+            "Session not ready for chat %d, queued for injection (depth: %d)",
+            chat_id, len(_setup_queues[chat_id]),
         )
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"⏳ Agent is busy\\. Message queued \\(position {queue_len}\\)\\.",
+                text="⏳ Setting up session\\.\\.\\. message will be injected shortly\\.",
                 parse_mode="MarkdownV2",
             )
         except Exception:
-            logger.debug("Failed to send queue notification for chat %d", chat_id)
-        return
+            logger.debug("Failed to send setup-queue notification for chat %d", chat_id)
 
-    await _start_agent_task(prompt, attachments, chat_id, config, db, context)
+
+async def _inject_message(
+    session: AgentSession,
+    prompt: str,
+    attachments: list[FileAttachment],
+    chat_id: int,
+    bot: Bot,
+) -> None:
+    """Inject a user message into a live agent session.
+
+    The message is sent via ``session.client.query()`` which writes to
+    the CLI subprocess stdin.  The already-running ``receive_response()``
+    iterator will pick up the resulting events naturally.
+    """
+    actual_prompt, attachment_paths = prepare_prompt(
+        prompt, attachments if attachments else None,
+    )
+
+    # Track attachment paths for cleanup in _run()'s finally block.
+    if attachment_paths:
+        _injected_attachment_paths.setdefault(chat_id, []).extend(attachment_paths)
+
+    try:
+        await session.client.query(actual_prompt)
+        logger.info(
+            "Injected message into live session for chat %d: %s",
+            chat_id, actual_prompt[:100],
+        )
+    except Exception:
+        logger.exception("Failed to inject message for chat %d", chat_id)
+        cleanup_attachments(attachment_paths)
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Failed to inject message into the running session\\.",
+                parse_mode="MarkdownV2",
+            )
+        except Exception:
+            pass
 
 
 async def _start_agent_task(
@@ -851,6 +919,8 @@ async def _start_agent_task(
         actual_prompt, attachment_paths = prepare_prompt(
             prompt, attachments if attachments else None,
         )
+        # Collect all attachment paths (original + injected) for cleanup.
+        all_attachment_paths: list[Path] = list(attachment_paths)
 
         try:
             async def request_approval(
@@ -894,7 +964,34 @@ async def _start_agent_task(
                 bot=context.bot,
             )
 
-            events = query_and_stream(session, actual_prompt)
+            # Send the primary query.
+            await session.client.query(actual_prompt)
+
+            # Mark session as injectable so concurrent messages are
+            # injected via client.query() instead of queued.
+            _injectable_sessions[chat_id] = session
+
+            # Drain any messages that arrived during the setup phase.
+            setup_queue = _setup_queues.pop(chat_id, [])
+            for queued_prompt, queued_attachments in setup_queue:
+                queued_actual, queued_paths = prepare_prompt(
+                    queued_prompt, queued_attachments if queued_attachments else None,
+                )
+                all_attachment_paths.extend(queued_paths)
+                try:
+                    await session.client.query(queued_actual)
+                    logger.info(
+                        "Injected setup-queued message for chat %d: %s",
+                        chat_id, queued_actual[:100],
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to inject setup-queued message for chat %d",
+                        chat_id,
+                    )
+
+            # Consume events (the query has already been sent above).
+            events = receive_events(session)
             result = await stream_response(
                 bot=context.bot,
                 chat_id=chat_id,
@@ -927,7 +1024,13 @@ async def _start_agent_task(
             except Exception:
                 logger.exception("Failed to send error message")
         finally:
-            cleanup_attachments(attachment_paths)
+            # Collect injected attachment paths and clean up everything.
+            all_attachment_paths.extend(
+                _injected_attachment_paths.pop(chat_id, [])
+            )
+            cleanup_attachments(all_attachment_paths)
+            _injectable_sessions.pop(chat_id, None)
+            _setup_queues.pop(chat_id, None)
             if draft_state.session_id:
                 try:
                     await set_session_id(db, chat_id, ctx_name, draft_state.session_id)
@@ -936,29 +1039,9 @@ async def _start_agent_task(
                         "Failed to save session on cleanup for chat %d", chat_id
                     )
             _running_tasks.pop(chat_id, None)
-            await _drain_queue(chat_id)
 
     task = asyncio.create_task(_run())
     _running_tasks[chat_id] = task
-
-
-async def _drain_queue(chat_id: int) -> None:
-    """Pop the next queued message for *chat_id* and start it."""
-    queue = _pending_queues.get(chat_id)
-    if not queue:
-        _pending_queues.pop(chat_id, None)
-        return
-
-    prompt, attachments, config, db, context = queue.pop(0)
-    remaining = len(queue)
-    if not queue:
-        _pending_queues.pop(chat_id, None)
-
-    logger.info(
-        "Draining queue for chat %d: starting next message (%d remaining)",
-        chat_id, remaining,
-    )
-    await _start_agent_task(prompt, attachments, chat_id, config, db, context)
 
 
 # ── AskUserQuestion handling ──
