@@ -46,6 +46,9 @@ class TestRunSetupWizard:
         assert ctx["description"] == "My project"
         assert ctx["model"] == "claude-sonnet-4-6"
         assert ctx["allowed_tools"] == ["LSP", "AskUserQuestion"]
+        review = raw["review"]
+        assert review["tunnel"] == "cloudflared"
+        assert 49152 <= review["port"] <= 65535
 
     def test_uses_defaults(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"

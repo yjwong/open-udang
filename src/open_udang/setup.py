@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -160,6 +161,10 @@ def _build_config_dict(
         "allowed_users": [user_id],
         "contexts": {context_name: context},
         "default_context": context_name,
+        "review": {
+            "port": random.randint(49152, 65535),
+            "tunnel": "cloudflared",
+        },
     }
 
 
