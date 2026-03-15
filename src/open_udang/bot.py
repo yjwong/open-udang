@@ -950,7 +950,7 @@ async def _inject_message(
     iterator will pick up the resulting events naturally.
     """
     actual_prompt, attachment_paths = prepare_prompt(
-        prompt, attachments if attachments else None,
+        prompt, attachments if attachments else None, chat_id=chat_id,
     )
 
     # Track attachment paths for cleanup in _run()'s finally block.
@@ -997,7 +997,7 @@ async def _start_agent_task(
     async def _run() -> None:
         draft_state = _DraftState(chat_id=chat_id)
         actual_prompt, attachment_paths = prepare_prompt(
-            prompt, attachments if attachments else None,
+            prompt, attachments if attachments else None, chat_id=chat_id,
         )
         # Collect all attachment paths (original + injected) for cleanup.
         all_attachment_paths: list[Path] = list(attachment_paths)
@@ -1056,6 +1056,7 @@ async def _start_agent_task(
             for queued_prompt, queued_attachments in setup_queue:
                 queued_actual, queued_paths = prepare_prompt(
                     queued_prompt, queued_attachments if queued_attachments else None,
+                    chat_id=chat_id,
                 )
                 all_attachment_paths.extend(queued_paths)
                 try:

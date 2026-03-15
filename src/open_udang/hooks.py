@@ -22,8 +22,10 @@ handled here instead.
 
 import logging
 import os
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk.types import (
@@ -34,6 +36,11 @@ from claude_agent_sdk.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Dedicated temp directory for file uploads.  Read access to files within
+# this directory is auto-approved so the agent doesn't need extra
+# permission to read user-uploaded attachments.
+ATTACHMENT_TEMP_DIR = Path(tempfile.gettempdir()) / "openudang_uploads"
 
 # Type for the approval callback: receives tool_name, tool_input dict,
 # and tool_use_id; returns True (allow) or False (deny).
@@ -113,6 +120,7 @@ def make_can_use_tool(
     handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
     notify_auto_approved_edit: EditNotifyCallback | None = None,
+    chat_id: int | None = None,
 ) -> Callable[
     [str, dict[str, Any], ToolPermissionContext], Awaitable[PermissionResult]
 ]:
@@ -151,8 +159,15 @@ def make_can_use_tool(
             mutating tool is auto-approved (accept-all-edits mode). Receives
             the tool name and input dict so the caller can display the diff
             without blocking the agent.
+        chat_id: Optional Telegram chat ID. When provided, the per-chat
+            upload directory (``ATTACHMENT_TEMP_DIR/<chat_id>/``) is added
+            to the approved directories so Read access to uploaded files is
+            auto-approved.
     """
     approved_dirs = [cwd] + (additional_directories or [])
+    if chat_id is not None:
+        upload_dir = str(ATTACHMENT_TEMP_DIR / str(chat_id))
+        approved_dirs.append(upload_dir)
 
     async def can_use_tool(
         tool_name: str,

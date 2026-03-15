@@ -126,6 +126,7 @@ async def get_or_create_session(
         handle_user_questions=_make_questions_proxy(callback_context),
         is_edit_auto_approved=_make_edit_approved_proxy(callback_context),
         notify_auto_approved_edit=_make_edit_notify_proxy(callback_context),
+        chat_id=chat_id,
     )
 
     def _log_stderr(line: str) -> None:

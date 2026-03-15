@@ -90,13 +90,26 @@ def _sanitize_filename(name: str) -> str:
     return re.sub(r"[^\w.\-]", "_", name)
 
 
-def _save_attachments_to_temp(attachments: list[FileAttachment]) -> list[Path]:
+def _save_attachments_to_temp(
+    attachments: list[FileAttachment],
+    chat_id: int,
+) -> list[Path]:
     """Save file attachments to temp files and return their paths.
 
+    Files are saved into a per-chat subdirectory of
+    :data:`~open_udang.hooks.ATTACHMENT_TEMP_DIR` so the canUseTool hook
+    can auto-approve Read access for uploaded files without granting
+    access to the entire ``/tmp`` tree.  Per-chat scoping prevents one
+    agent session from accessing another session's uploads.
+
     Files are created with delete=False so they persist for the agent to
-    read.  The caller is responsible for cleanup (or we rely on OS temp
-    cleanup).
+    read.  The caller is responsible for cleanup.
     """
+    from open_udang.hooks import ATTACHMENT_TEMP_DIR
+
+    chat_dir = ATTACHMENT_TEMP_DIR / str(chat_id)
+    chat_dir.mkdir(parents=True, exist_ok=True)
+
     paths: list[Path] = []
     for att in attachments:
         ext = _MIME_TO_EXT.get(att.mime_type, ".bin")
@@ -104,7 +117,8 @@ def _save_attachments_to_temp(attachments: list[FileAttachment]) -> list[Path]:
         safe_name = _sanitize_filename(att.filename) if att.filename else ""
         prefix = f"openudang_{safe_name}_" if safe_name else "openudang_"
         tmp = tempfile.NamedTemporaryFile(
-            suffix=ext, prefix=prefix, delete=False
+            suffix=ext, prefix=prefix, delete=False,
+            dir=chat_dir,
         )
         tmp.write(att.data)
         tmp.close()
@@ -132,15 +146,23 @@ def _build_prompt_with_attachments(prompt: str, attachment_paths: list[Path]) ->
 def prepare_prompt(
     prompt: str,
     attachments: list[FileAttachment] | None = None,
+    *,
+    chat_id: int = 0,
 ) -> tuple[str, list[Path]]:
     """Build the actual prompt and save attachments to temp files.
+
+    Args:
+        prompt: The user's message text.
+        attachments: Optional file attachments to include.
+        chat_id: Telegram chat ID, used to scope the temp directory so
+            each chat's uploads are isolated.
 
     Returns ``(actual_prompt, attachment_paths)`` where *attachment_paths*
     should be cleaned up by the caller after the query completes.
     """
     attachment_paths: list[Path] = []
     if attachments:
-        attachment_paths = _save_attachments_to_temp(attachments)
+        attachment_paths = _save_attachments_to_temp(attachments, chat_id)
         actual_prompt = _build_prompt_with_attachments(prompt, attachment_paths)
     else:
         actual_prompt = prompt
@@ -229,7 +251,7 @@ async def run_agent(
     # Save attachments to temp files and build the prompt with file references.
     attachment_paths: list[Path] = []
     if attachments:
-        attachment_paths = _save_attachments_to_temp(attachments)
+        attachment_paths = _save_attachments_to_temp(attachments, chat_id=0)
         actual_prompt = _build_prompt_with_attachments(prompt, attachment_paths)
     else:
         actual_prompt = prompt
