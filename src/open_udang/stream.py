@@ -390,6 +390,64 @@ async def finalize_and_reset(bot: Bot, state: _DraftState) -> None:
     state.turn_complete = False
 
 
+_ASSISTANT_ERROR_MESSAGES: dict[str, str] = {
+    "authentication_failed": (
+        "⚠️ **Authentication failed.** Claude was unable to authenticate. "
+        "Check that your API key or OAuth session is valid."
+    ),
+    "billing_error": (
+        "⚠️ **Billing error.** There is a problem with your Anthropic account billing. "
+        "Please check your account at console.anthropic.com."
+    ),
+    "rate_limit": (
+        "⚠️ **Rate limited.** Too many requests — please wait a moment and try again."
+    ),
+    "invalid_request": (
+        "⚠️ **Invalid request.** The request to Claude was rejected. "
+        "This may indicate a configuration issue."
+    ),
+    "server_error": (
+        "⚠️ **Server error.** Anthropic's servers returned an error. "
+        "Please try again shortly."
+    ),
+    "unknown": (
+        "⚠️ **Unknown error.** An unexpected error occurred while communicating "
+        "with Claude."
+    ),
+}
+
+
+async def _handle_assistant_error(
+    bot: Bot, state: _DraftState, error: str,
+) -> None:
+    """Send a user-friendly error message for AssistantMessage errors."""
+    logger.warning("AssistantMessage error for chat %d: %s", state.chat_id, error)
+
+    msg_text = _ASSISTANT_ERROR_MESSAGES.get(
+        error,
+        f"⚠️ **Error:** {error}",
+    )
+
+    await finalize_and_reset(bot, state)
+    try:
+        chunks = gfm_to_telegram(msg_text)
+        text = chunks[0] if chunks else msg_text
+        await bot.send_message(
+            chat_id=state.chat_id,
+            text=text,
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        logger.exception("Failed to send error message for %s", error)
+        try:
+            await bot.send_message(
+                chat_id=state.chat_id,
+                text=msg_text,
+            )
+        except Exception:
+            logger.exception("Failed to send plaintext error fallback")
+
+
 async def stream_response(
     bot: Bot,
     chat_id: int,
@@ -436,6 +494,11 @@ async def stream_response(
 
         async for event in events:
             if isinstance(event, AssistantMessage):
+                # Check for SDK-level errors (auth failures, billing,
+                # rate limits, etc.) and surface them to the user.
+                if event.error:
+                    await _handle_assistant_error(bot, state, event.error)
+
                 # Mark this turn's text as complete. When the next
                 # turn's StreamEvent deltas arrive, we'll insert a
                 # newline separator to prevent text concatenation.
