@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import type { Hunk } from "../lib/types";
 import { stageHunk, unstageHunk, StaleHunkError } from "../lib/api";
 import { HunkCard } from "./HunkCard";
+import { FilePicker } from "./FilePicker";
 import { ProgressBar } from "./ProgressBar";
 import { SummaryScreen } from "./SummaryScreen";
 import { useSwipe, type SwipeDirection } from "../hooks/useSwipe";
@@ -255,6 +256,16 @@ export function SwipeDeck({
     }
   }, [hunks.length, currentIndex, totalHunks, onNeedMore, skipToFirstUnstaged]);
 
+  const handleJumpToFile = useCallback(
+    (hunkIndex: number) => {
+      if (hunkIndex === currentIndex) return;
+      setError(null);
+      setCurrentIndex(hunkIndex);
+      // Don't record decisions for jumps — the user is navigating, not reviewing
+    },
+    [currentIndex],
+  );
+
   const hasUnstagedAhead = hunks.some(
     (h, i) => i >= currentIndex && !h.staged,
   );
@@ -294,6 +305,12 @@ export function SwipeDeck({
     <div className="swipe-deck">
       <div className="swipe-deck-toolbar">
         <ProgressBar current={currentIndex} total={totalHunks} />
+        <FilePicker
+          hunks={hunks}
+          currentIndex={currentIndex}
+          onJumpToFile={handleJumpToFile}
+          disabled={isProcessing}
+        />
         {showSkipButton && (
           <button
             className="skip-to-unstaged-btn"
