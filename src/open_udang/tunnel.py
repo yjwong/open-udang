@@ -28,7 +28,7 @@ _BINARY_MAP: dict[tuple[str, str], str] = {
     ("Linux", "aarch64"): "cloudflared-linux-arm64",
     ("Linux", "armv7l"): "cloudflared-linux-arm",
     ("Darwin", "x86_64"): "cloudflared-darwin-amd64.tgz",
-    ("Darwin", "arm64"): "cloudflared-darwin-amd64.tgz",
+    ("Darwin", "arm64"): "cloudflared-darwin-arm64.tgz",
     ("Windows", "AMD64"): "cloudflared-windows-amd64.exe",
 }
 
