@@ -79,6 +79,8 @@ Session state is stored separately per context under `~/.config/openudang/contai
 
 Grab the latest binary from [Releases](https://github.com/yjwong/open-udang/releases). No Python or package manager required — just download, configure, and run.
 
+> **Note:** The Linux binaries require glibc ≥ 2.39 (Ubuntu 24.04+, Debian 13+, Fedora 40+). On older distros, use the [from-source](#option-2-from-source) install instead.
+
 ```bash
 # Linux x86_64
 curl -fsSL https://github.com/yjwong/open-udang/releases/latest/download/openudang-linux-x86_64 -o openudang
@@ -99,9 +101,22 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/yjwong/open-udang.git
 cd open-udang
-uv sync
 
-# Set up your config
+# Build the review Mini App (requires Node.js 18+)
+cd web/review-app && npm install && npm run build && cd ../..
+
+# If you don't need the /review feature, create an empty placeholder instead:
+# mkdir -p web/review-app/dist
+
+uv sync
+```
+
+Just like the binary, running `uv run openudang` without a config file will launch the interactive setup wizard. Or configure manually:
+
+<details>
+<summary>Manual config setup</summary>
+
+```bash
 cp config.example.yaml ~/.config/openudang/config.yaml
 ```
 
@@ -122,6 +137,8 @@ contexts:
 
 default_context: my-project
 ```
+
+</details>
 
 ### Run
 
