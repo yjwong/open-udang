@@ -1866,11 +1866,22 @@ async def review_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     from telegram import WebAppInfo
 
+    # Telegram Mini App (web_app) buttons only work in private chats.
+    # The review app also relies on Telegram.WebApp.initData for auth,
+    # which is unavailable outside the Mini App WebView.
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    if chat_type != "private":
+        await update.message.reply_text(
+            "The review Mini App is only available in private chats\\. "
+            "Send /review to me in a DM instead\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     escaped_context = _escape_mdv2(context_name)
     dirs = [ctx.directory] + (ctx.additional_directories or [])
 
     if len(dirs) == 1:
-        # Single directory: current behavior.
         app_url = f"{base_url}/app/?chat_id={chat_id}"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(
