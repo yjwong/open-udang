@@ -98,6 +98,7 @@ Key fields:
 | `/model` | `model_handler` | Show or override the model for this chat |
 | `/resume` | `resume_handler` | List and resume a previous session |
 | `/review` | `review_handler` | Open the review Mini App for the current context |
+| `/mcp` | `mcp_handler` | List and manage MCP servers (reset/enable/disable) |
 
 ## Conventions
 

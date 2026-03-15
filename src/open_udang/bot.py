@@ -1915,6 +1915,173 @@ async def review_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
+# ── MCP command ──
+
+# Status emoji map for MCP server connection status.
+_MCP_STATUS_EMOJI: dict[str, str] = {
+    "connected": "🟢",
+    "pending": "🟡",
+    "failed": "🔴",
+    "needs-auth": "🟠",
+    "disabled": "⚪",
+}
+
+
+async def mcp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /mcp command: list, reconnect, enable, or disable MCP servers.
+
+    Usage:
+        /mcp                    — list all MCP servers and their status
+        /mcp reset <name>       — reconnect a failed/disconnected server
+        /mcp enable <name>      — enable a disabled server
+        /mcp disable <name>     — disable a server
+    """
+    config: Config = context.bot_data["config"]
+    db: aiosqlite.Connection = context.bot_data["db"]
+    message = update.effective_message
+    if not message or not _is_authorized(update.effective_user and update.effective_user.id, config):
+        return
+
+    chat_id = message.chat_id
+
+    from open_udang.client_manager import get_session
+
+    session = get_session(chat_id)
+    if session is None:
+        await message.reply_text(
+            "No active session\\. Send a message first to start a session, "
+            "then use /mcp to manage MCP servers\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    args = message.text.split() if message.text else []
+    subcommand = args[1] if len(args) >= 2 else None
+    server_name = " ".join(args[2:]) if len(args) >= 3 else None
+
+    if subcommand is None:
+        # List all MCP servers
+        await _mcp_list(message, session)
+    elif subcommand == "reset":
+        if not server_name:
+            await message.reply_text(
+                "Usage: `/mcp reset <server\\-name>`",
+                parse_mode="MarkdownV2",
+            )
+            return
+        await _mcp_reconnect(message, session, server_name)
+    elif subcommand in ("enable", "disable"):
+        if not server_name:
+            await message.reply_text(
+                f"Usage: `/mcp {subcommand} <server\\-name>`",
+                parse_mode="MarkdownV2",
+            )
+            return
+        await _mcp_toggle(message, session, server_name, enabled=(subcommand == "enable"))
+    else:
+        await message.reply_text(
+            "Unknown subcommand\\. Usage:\n"
+            "`/mcp` — list servers\n"
+            "`/mcp reset <name>` — reconnect a server\n"
+            "`/mcp enable <name>` — enable a server\n"
+            "`/mcp disable <name>` — disable a server",
+            parse_mode="MarkdownV2",
+        )
+
+
+async def _mcp_list(message: Any, session: AgentSession) -> None:
+    """Fetch and display MCP server status."""
+    try:
+        status_resp = await session.client.get_mcp_status()
+    except Exception:
+        logger.exception("Failed to get MCP status")
+        await message.reply_text("Failed to retrieve MCP server status\\.", parse_mode="MarkdownV2")
+        return
+
+    servers = status_resp.get("mcpServers", [])
+    if not servers:
+        await message.reply_text("No MCP servers configured\\.", parse_mode="MarkdownV2")
+        return
+
+    lines: list[str] = ["*MCP Servers*\n"]
+    for srv in servers:
+        name = srv.get("name", "unknown")
+        status = srv.get("status", "unknown")
+        emoji = _MCP_STATUS_EMOJI.get(status, "❓")
+        scope = srv.get("scope", "")
+
+        line = f"{emoji} *{_escape_mdv2(name)}*"
+        if scope:
+            line += f" \\({_escape_mdv2(scope)}\\)"
+        line += f" — {_escape_mdv2(status)}"
+
+        # Show server info (version) when connected
+        server_info = srv.get("serverInfo")
+        if server_info:
+            version = server_info.get("version", "")
+            if version:
+                line += f" v{_escape_mdv2(version)}"
+
+        # Show error message for failed servers
+        error = srv.get("error")
+        if error:
+            # Truncate long errors
+            if len(error) > 120:
+                error = error[:117] + "..."
+            line += f"\n    ⚠️ {_escape_mdv2(error)}"
+
+        # Show tool count when connected
+        tools = srv.get("tools", [])
+        if tools:
+            line += f"\n    🔧 {len(tools)} tool{'s' if len(tools) != 1 else ''}"
+
+        lines.append(line)
+
+    text = "\n".join(lines)
+    await message.reply_text(text, parse_mode="MarkdownV2")
+
+
+async def _mcp_reconnect(message: Any, session: AgentSession, server_name: str) -> None:
+    """Reconnect a failed or disconnected MCP server."""
+    try:
+        await session.client.reconnect_mcp_server(server_name)
+    except Exception:
+        logger.exception("Failed to reconnect MCP server %s", server_name)
+        await message.reply_text(
+            f"Failed to reconnect `{_escape_mdv2(server_name)}`\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    escaped = _escape_mdv2(server_name)
+    await message.reply_text(
+        f"Reconnecting `{escaped}`\\.\\.\\. Use /mcp to check status\\.",
+        parse_mode="MarkdownV2",
+    )
+
+
+async def _mcp_toggle(message: Any, session: AgentSession, server_name: str, *, enabled: bool) -> None:
+    """Enable or disable an MCP server."""
+    action = "enable" if enabled else "disable"
+    try:
+        await session.client.toggle_mcp_server(server_name, enabled=enabled)
+    except Exception:
+        logger.exception("Failed to %s MCP server %s", action, server_name)
+        await message.reply_text(
+            f"Failed to {_escape_mdv2(action)} `{_escape_mdv2(server_name)}`\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    past = "enabled" if enabled else "disabled"
+    escaped = _escape_mdv2(server_name)
+    emoji = "🟢" if enabled else "⚪"
+    await message.reply_text(
+        f"{emoji} `{escaped}` {past}\\.",
+        parse_mode="MarkdownV2",
+    )
+
+
 # ── Application setup ──
 
 
@@ -1937,6 +2104,7 @@ def build_application(config: Config, db: aiosqlite.Connection) -> Application:
     app.add_handler(CommandHandler("resume", resume_handler))
     app.add_handler(CommandHandler("model", model_handler))
     app.add_handler(CommandHandler("review", review_handler))
+    app.add_handler(CommandHandler("mcp", mcp_handler))
 
     # Callback query handler for tool approval buttons
     app.add_handler(CallbackQueryHandler(callback_query_handler))
@@ -1962,6 +2130,7 @@ async def run_bot(config: Config, db: aiosqlite.Connection) -> None:
         BotCommand("resume", "List and resume a previous session"),
         BotCommand("model", "Show or override the model for this chat"),
         BotCommand("review", "Review and stage git changes"),
+        BotCommand("mcp", "List and manage MCP servers"),
     ])
     await app.start()
     await app.updater.start_polling()
