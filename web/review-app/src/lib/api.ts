@@ -71,3 +71,18 @@ export async function unstageHunk(hunkId: string, chatId: string, dir: string): 
     throw new Error(`Failed to unstage hunk: ${response.status} ${response.statusText}`);
   }
 }
+
+export async function commitChanges(chatId: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/commit`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ chat_id: chatId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to commit: ${response.status} ${response.statusText}`);
+  }
+}

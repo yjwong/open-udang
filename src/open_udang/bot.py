@@ -24,6 +24,7 @@ import aiosqlite
 
 from open_udang.client_manager import close_all_sessions
 from open_udang.config import Config
+from open_udang.dispatch_registry import register_dispatch
 from open_udang.handlers.approval import handle_approval_callback
 from open_udang.handlers.commands import (
     cancel_handler,
@@ -36,7 +37,7 @@ from open_udang.handlers.commands import (
     review_handler,
     status_handler,
 )
-from open_udang.handlers.messages import message_handler
+from open_udang.handlers.messages import message_handler, web_app_data_handler
 from open_udang.handlers.questions import _handle_question_callback
 from open_udang.handlers.utils import _is_authorized
 
@@ -106,6 +107,11 @@ def build_application(config: Config, db: aiosqlite.Connection) -> Application:
     # Callback query handler for tool approval buttons
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
+    # Web App data handler (e.g. commit from review app)
+    app.add_handler(MessageHandler(
+        filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler
+    ))
+
     # Message handler (text, photos, documents, and locations, non-command)
     app.add_handler(MessageHandler(
         (filters.TEXT | filters.PHOTO | filters.Document.ALL | filters.LOCATION) & ~filters.COMMAND, message_handler
@@ -119,6 +125,19 @@ async def run_bot(config: Config, db: aiosqlite.Connection) -> None:
     app = build_application(config, db)
     logger.info("Starting bot with long polling")
     await app.initialize()
+
+    # Register the agent dispatch callback so the review API (and other
+    # components) can send prompts to the agent without needing a direct
+    # reference to the bot Application.
+    from open_udang.handlers.messages import _dispatch_to_agent
+
+    async def _dispatch(prompt: str, chat_id: int) -> None:
+        # Build a minimal ContextTypes-compatible object.  _dispatch_to_agent
+        # only uses context.bot, context.bot_data, and asyncio.create_task.
+        await _dispatch_to_agent(prompt, [], chat_id, config, db, app)
+
+    register_dispatch(_dispatch)
+
     await app.bot.set_my_commands([
         BotCommand("context", "List or switch contexts"),
         BotCommand("clear", "Start a fresh session"),

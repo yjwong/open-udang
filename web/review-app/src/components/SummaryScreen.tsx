@@ -1,15 +1,19 @@
 interface SummaryScreenProps {
   stagedCount: number;
   skippedCount: number;
+  hasStagedHunks: boolean;
   onRefresh: () => void;
   onClose: () => void;
+  onCommit: () => void;
 }
 
 export function SummaryScreen({
   stagedCount,
   skippedCount,
+  hasStagedHunks,
   onRefresh,
   onClose,
+  onCommit,
 }: SummaryScreenProps) {
   const total = stagedCount + skippedCount;
 
@@ -31,6 +35,11 @@ export function SummaryScreen({
         </div>
       </div>
       <div className="summary-actions">
+        {hasStagedHunks && (
+          <button className="summary-btn summary-btn-commit" onClick={onCommit}>
+            Commit Staged Changes
+          </button>
+        )}
         <button className="summary-btn summary-btn-primary" onClick={onClose}>
           Done
         </button>

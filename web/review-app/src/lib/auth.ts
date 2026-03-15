@@ -4,6 +4,7 @@ declare global {
       WebApp: {
         initData: string;
         close: () => void;
+        sendData: (data: string) => void;
       };
     };
   }

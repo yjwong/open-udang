@@ -656,6 +656,11 @@ body {
   color: #fff;
 }
 
+.summary-btn-commit {
+  background: #2ea043;
+  color: #fff;
+}
+
 .summary-btn-secondary {
   background: transparent;
   color: var(--text-secondary);

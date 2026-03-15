@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { FileSummary, Hunk } from "../lib/types";
-import { stageHunk, unstageHunk, StaleHunkError } from "../lib/api";
+import { stageHunk, unstageHunk, commitChanges, StaleHunkError } from "../lib/api";
 import { HunkCard } from "./HunkCard";
 import { FilePicker } from "./FilePicker";
 import { ProgressBar } from "./ProgressBar";
@@ -313,13 +313,30 @@ export function SwipeDeck({
     }
   }, []);
 
+  const handleCommit = useCallback(async () => {
+    try {
+      await commitChanges(chatId);
+      // Close the Mini App after successfully dispatching the commit.
+      window.Telegram?.WebApp?.close();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to commit");
+    }
+  }, [chatId]);
+
+  // Check if there are any staged hunks in git (not just from this session).
+  // This accounts for hunks that were already staged before the review started
+  // or that were auto-skipped via "Skip to unstaged".
+  const hasStagedHunks = hunks.some((h) => h.staged) || stagedCount > 0;
+
   if (isComplete) {
     return (
       <SummaryScreen
         stagedCount={stagedCount}
         skippedCount={skippedCount}
+        hasStagedHunks={hasStagedHunks}
         onRefresh={handleRefresh}
         onClose={handleClose}
+        onCommit={handleCommit}
       />
     );
   }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -209,6 +210,42 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
     await _dispatch_to_agent(prompt, attachments, chat_id, config, db, context)
+
+
+async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle data sent from a Telegram Mini App (e.g. commit from review app).
+
+    The review Mini App uses ``WebApp.sendData()`` to send a JSON payload
+    back to the bot.  Telegram delivers this as a message with
+    ``web_app_data`` set.
+    """
+    config: Config = context.bot_data["config"]
+    db: aiosqlite.Connection = context.bot_data["db"]
+    message = update.effective_message
+    if not message or not message.web_app_data:
+        return
+
+    user_id = update.effective_user.id if update.effective_user else None
+    if not _is_authorized(user_id, config):
+        logger.info("web_app_data_handler: unauthorized user %s", update.effective_user)
+        return
+
+    try:
+        payload = json.loads(message.web_app_data.data)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Invalid web_app_data JSON: %s", message.web_app_data.data)
+        return
+
+    action = payload.get("action")
+    if action == "commit":
+        chat_id = message.chat_id
+        prompt = (
+            "Please commit the currently staged changes. "
+            "Generate an appropriate commit message based on the staged diff."
+        )
+        await _dispatch_to_agent(prompt, [], chat_id, config, db, context)
+    else:
+        logger.warning("Unknown web_app_data action: %s", action)
 
 
 # ---------------------------------------------------------------------------

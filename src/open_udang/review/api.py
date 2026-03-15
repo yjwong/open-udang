@@ -374,6 +374,55 @@ async def unstage_endpoint(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+async def commit_endpoint(request: Request) -> JSONResponse:
+    """POST /api/review/commit — request the bot to commit staged changes.
+
+    The Mini App calls this endpoint instead of ``WebApp.sendData()``
+    because ``sendData`` only works when the Mini App is opened from a
+    ``KeyboardButton``, not an ``InlineKeyboardButton``.
+
+    Expects JSON body: ``{"chat_id": <int>}``
+    """
+    try:
+        user_id = await _authenticate(request)
+    except AuthError as e:
+        return JSONResponse({"error": e.message}, status_code=e.status_code)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    try:
+        chat_id = int(body["chat_id"])
+    except (KeyError, ValueError, TypeError):
+        return JSONResponse(
+            {"error": "chat_id is required (integer)"}, status_code=400
+        )
+
+    from open_udang.dispatch_registry import dispatch as dispatch_to_agent
+
+    prompt = (
+        "Please commit the currently staged changes. "
+        "Generate an appropriate commit message based on the staged diff."
+    )
+    try:
+        await dispatch_to_agent(prompt, chat_id)
+    except RuntimeError as e:
+        logger.error("commit_endpoint: %s", e)
+        return JSONResponse(
+            {"error": "Commit dispatch not available — bot may not be running"},
+            status_code=503,
+        )
+    except Exception:
+        logger.exception("Failed to dispatch commit for chat %d", chat_id)
+        return JSONResponse(
+            {"error": "Failed to dispatch commit"}, status_code=500
+        )
+
+    return JSONResponse({"ok": True})
+
+
 def create_review_app(config: Config, db: aiosqlite.Connection) -> Starlette:
     """Create the Starlette application for the review API.
 
@@ -391,6 +440,7 @@ def create_review_app(config: Config, db: aiosqlite.Connection) -> Starlette:
         Route("/api/review/hunks", hunks_endpoint, methods=["GET"]),
         Route("/api/review/stage", stage_endpoint, methods=["POST"]),
         Route("/api/review/unstage", unstage_endpoint, methods=["POST"]),
+        Route("/api/review/commit", commit_endpoint, methods=["POST"]),
     ]
 
     if _dist_dir.is_dir():
