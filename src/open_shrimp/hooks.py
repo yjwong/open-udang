@@ -576,11 +576,13 @@ def make_can_use_tool(
             )
             return PermissionResultAllow()
 
-        # Containerized contexts: auto-approve all Bash commands since
-        # Docker isolation provides the safety boundary.
-        if is_containerized and tool_name == "Bash":
+        # Containerized contexts: auto-approve all shell-executing tools
+        # (Bash and Monitor) since the sandbox provides the safety
+        # boundary.  Monitor runs arbitrary shell commands just like Bash;
+        # the only difference is that its stdout is streamed as events.
+        if is_containerized and tool_name in ("Bash", "Monitor"):
             logger.info(
-                "Auto-approved Bash in containerized context"
+                "Auto-approved %s in containerized context", tool_name
             )
             return PermissionResultAllow()
 

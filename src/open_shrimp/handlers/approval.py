@@ -145,6 +145,33 @@ def _format_bash_approval(tool_input: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+def _format_monitor_approval(tool_input: dict[str, Any]) -> str:
+    """Format a Monitor tool call for the approval prompt.
+
+    Monitor runs an arbitrary shell command whose stdout is streamed as
+    events. Render the description as the header and the command in a
+    bash code block, mirroring Bash so the user can review what will run.
+    """
+    command = tool_input.get("command", "")
+    description = tool_input.get("description", "")
+    persistent = tool_input.get("persistent", False)
+
+    parts: list[str] = []
+    header = "\U0001f4e1 *Monitor*"
+    if description:
+        header = f"{header}: {_escape_mdv2(description)}"
+    if persistent:
+        header = f"{header} _\\(persistent\\)_"
+    parts.append(header)
+
+    max_cmd_len = 4096 - 200
+    if len(command) > max_cmd_len:
+        command = command[:max_cmd_len] + "\n..."
+    parts.append(f"```bash\n{_escape_mdv2(command)}\n```")
+
+    return "\n\n".join(parts)
+
+
 def _format_write_approval(
     tool_input: dict[str, Any], cwd: str | None = None,
 ) -> str:
@@ -306,6 +333,8 @@ async def _send_approval_keyboard(
         text = _format_edit_approval(tool_input, cwd=cwd)
     elif tool_name == "Bash":
         text = _format_bash_approval(tool_input)
+    elif tool_name == "Monitor":
+        text = _format_monitor_approval(tool_input)
     elif tool_name == "Write":
         text = _format_write_approval(tool_input, cwd=cwd)
     elif tool_name == "Agent":
@@ -358,7 +387,7 @@ async def _send_approval_keyboard(
     # path must go through the directory-scoped button below — blanket
     # per-tool rules must not bypass the directory boundary.  Bash and
     # ExitPlanMode have their own dedicated approval flows.
-    _no_accept_all = _PATH_SCOPED_TOOLS.keys() | {"ExitPlanMode", "Bash"}
+    _no_accept_all = _PATH_SCOPED_TOOLS.keys() | {"ExitPlanMode", "Bash", "Monitor"}
     if tool_name not in _no_accept_all:
         accept_all_tool_data = f"accept_all_tool:{tool_use_id}:{tool_name}"
         # Truncate callback_data to 64 bytes (Telegram limit)
