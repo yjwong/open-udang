@@ -98,6 +98,65 @@ _SUPPRESS_NOTIFICATION_TOOLS: set[str] = {"Bash", "Edit", "Write"}
 _bash_output_store: dict[str, str] = {}
 
 
+def _register_suggestion_for_turn(
+    *,
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    session_id: str,
+) -> None:
+    """Arrange for the next prompt_suggestion frame to add an inline button.
+
+    The CLI emits a ``prompt_suggestion`` frame asynchronously after the
+    result.  When it arrives, the handler edits the supplied
+    ``message_id`` (the last message of the just-finished turn) to add a
+    single inline button labelled with the suggestion.  Tapping the
+    button dispatches the suggestion text as the user's next message.
+    """
+    from open_shrimp.prompt_suggestion import (
+        CALLBACK_PREFIX,
+        register_handler,
+        store_suggestion,
+    )
+
+    async def handler(suggestion: str) -> None:
+        suggestion = suggestion.strip()
+        if not suggestion:
+            return
+        suggest_id = store_suggestion(suggestion)
+        # Telegram caps button labels at 64 bytes UTF-8; truncate with
+        # an ellipsis to stay safely under.
+        encoded = suggestion.encode("utf-8")
+        if len(encoded) > 60:
+            label = encoded[:57].decode("utf-8", errors="ignore") + "…"
+        else:
+            label = suggestion
+        button = InlineKeyboardButton(
+            f"💡 {label}", callback_data=f"{CALLBACK_PREFIX}{suggest_id}",
+        )
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=InlineKeyboardMarkup([[button]]),
+            )
+        except BadRequest as e:
+            # Common: "message is not modified" if a previous edit
+            # already attached a keyboard, or "message to edit not
+            # found" if the user deleted the message.  Both are benign.
+            logger.debug(
+                "Skipped suggestion edit for chat %d msg %d: %s",
+                chat_id, message_id, e,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to attach suggestion button for chat %d msg %d",
+                chat_id, message_id,
+            )
+
+    register_handler(session_id, handler)
+
+
 @dataclass
 class StreamResult:
     """Result from stream_response() with session and usage info."""
@@ -1080,6 +1139,18 @@ async def stream_response(
         if state.raw_text.strip():
             msg_ids = await _finalize_message(bot, state, silent=False)
             state.sent_message_ids.extend(msg_ids)
+
+        # Register a prompt_suggestion handler against the last assistant
+        # message of this turn.  The CLI emits the suggestion ~1.5 s after
+        # the result frame, well after this function returns; the handler
+        # is a closure that edits the message-id snapshot we have right now.
+        if state.session_id and state.sent_message_ids:
+            _register_suggestion_for_turn(
+                bot=bot,
+                chat_id=state.chat_id,
+                message_id=state.sent_message_ids[-1],
+                session_id=state.session_id,
+            )
 
         # Reset for the next stream_response() iteration.
         state.raw_text = ""
