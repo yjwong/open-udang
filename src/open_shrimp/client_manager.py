@@ -645,16 +645,24 @@ async def get_or_create_session(
             }
 
         # Keep MCP server credentials on the host; sandbox sees only
-        # HTTP endpoints via the proxy.
+        # HTTP endpoints via the proxy.  Covers stdio MCP servers
+        # (spawned on the host) and HTTP/SSE MCP servers (reverse-
+        # proxied so OAuth tokens stay on the host).
         if is_containerized and mcp_proxy is not None and sandbox is not None:
             from open_shrimp.mcp_proxy.config_reader import (
+                get_http_mcp_servers_for_directory,
                 get_mcp_servers_for_directory,
             )
 
             stdio_servers = get_mcp_servers_for_directory(context.directory)
-            if stdio_servers:
+            http_servers = get_http_mcp_servers_for_directory(
+                context.directory
+            )
+            if stdio_servers or http_servers:
                 token = mcp_proxy.register_context(
-                    context_name, stdio_servers
+                    context_name,
+                    servers=stdio_servers or None,
+                    http_servers=http_servers or None,
                 )
                 host_ip = sandbox.host_address
                 for name in stdio_servers:
@@ -667,12 +675,24 @@ async def get_or_create_session(
                             "Authorization": f"Bearer {token}",
                         },
                     }
+                for name, http_cfg in http_servers.items():
+                    mcp_servers[name] = {
+                        "type": http_cfg.transport,
+                        "url": mcp_proxy.get_http_proxy_url(
+                            context_name, name, host_ip
+                        ),
+                        "headers": {
+                            "Authorization": f"Bearer {token}",
+                        },
+                    }
                 logger.info(
-                    "Injected %d proxied MCP server(s) for sandboxed "
-                    "context '%s': %s",
+                    "Injected %d stdio + %d HTTP proxied MCP server(s) "
+                    "for sandboxed context '%s': stdio=[%s] http=[%s]",
                     len(stdio_servers),
+                    len(http_servers),
                     context_name,
                     ", ".join(stdio_servers),
+                    ", ".join(http_servers),
                 )
 
         options.mcp_servers = mcp_servers

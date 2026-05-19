@@ -10,7 +10,10 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass, field
 
-from open_shrimp.mcp_proxy.config_reader import StdioServerConfig
+from open_shrimp.mcp_proxy.config_reader import (
+    HttpServerConfig,
+    StdioServerConfig,
+)
 
 
 @dataclass
@@ -20,6 +23,7 @@ class ContextRegistration:
     context_name: str
     token: str
     servers: dict[str, StdioServerConfig]
+    http_servers: dict[str, HttpServerConfig] = field(default_factory=dict)
 
 
 class ProxyRegistry:
@@ -32,23 +36,29 @@ class ProxyRegistry:
     def register_context(
         self,
         context_name: str,
-        servers: dict[str, StdioServerConfig],
+        servers: dict[str, StdioServerConfig] | None = None,
+        http_servers: dict[str, HttpServerConfig] | None = None,
     ) -> str:
         """Register (or re-register) servers for *context_name*.
 
         Returns the auth token.  If the context is already registered,
-        the existing token is returned and the server list is updated.
+        the existing token is returned and the server lists are merged
+        (later calls overwrite entries with the same name).
         """
+        stdio = servers or {}
+        http = http_servers or {}
         existing = self._by_context.get(context_name)
         if existing is not None:
-            existing.servers = servers
+            existing.servers = {**existing.servers, **stdio}
+            existing.http_servers = {**existing.http_servers, **http}
             return existing.token
 
         token = secrets.token_hex(32)
         reg = ContextRegistration(
             context_name=context_name,
             token=token,
-            servers=servers,
+            servers=stdio,
+            http_servers=http,
         )
         self._by_token[token] = reg
         self._by_context[context_name] = reg
