@@ -10,6 +10,7 @@ import asyncio
 import logging
 import mimetypes
 import os
+import signal
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1111,6 +1112,7 @@ def create_openshrimp_mcp_server(
                     cwd=_host_workdir,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
                 )
             except Exception as exc:
                 return _text_result(
@@ -1123,7 +1125,7 @@ def create_openshrimp_mcp_server(
                 )
             except asyncio.TimeoutError:
                 try:
-                    proc.kill()
+                    os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 await proc.wait()
