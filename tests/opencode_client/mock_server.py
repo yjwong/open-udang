@@ -28,6 +28,16 @@ class MockOpenCode:
         # Records POSTs for assertions.
         self.created_sessions: list[dict[str, Any]] = []
         self.prompts: list[dict[str, Any]] = []
+        # Records permission replies for assertions.
+        self.permission_replies: list[dict[str, Any]] = []
+        # Records session patches (e.g. update_permission_rules).
+        self.patched_sessions: list[dict[str, Any]] = []
+        # Records aborts.
+        self.aborted_sessions: list[str] = []
+        # Per-session "stored" messages used by GET /session/{sid}/message/{mid}.
+        # Tests script this when they need the bridge's message-fetch
+        # fallback to find a matching ToolPart.
+        self.messages: dict[tuple[str, str], dict[str, Any]] = {}
 
         # Each /event subscriber gets its own queue. _subscribers is a list
         # of asyncio.Queue[dict | None]. None signals end-of-stream.
@@ -40,8 +50,28 @@ class MockOpenCode:
                 Route("/event", self._event_stream),
                 Route("/session", self._create_session, methods=["POST"]),
                 Route(
+                    "/session/{sid}",
+                    self._patch_session,
+                    methods=["PATCH"],
+                ),
+                Route(
                     "/session/{sid}/prompt_async",
                     self._prompt_async,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/session/{sid}/abort",
+                    self._abort_session,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/session/{sid}/message/{mid}",
+                    self._get_message,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/permission/{rid}/reply",
+                    self._permission_reply,
                     methods=["POST"],
                 ),
             ]
@@ -120,6 +150,37 @@ class MockOpenCode:
         asyncio.create_task(replay())
         return Response(status_code=204)
 
+    async def _patch_session(self, request: Request) -> Response:
+        sid = request.path_params["sid"]
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        self.patched_sessions.append({"session_id": sid, "body": body})
+        return JSONResponse({"id": sid})
+
+    async def _abort_session(self, request: Request) -> Response:
+        sid = request.path_params["sid"]
+        self.aborted_sessions.append(sid)
+        return Response(status_code=204)
+
+    async def _get_message(self, request: Request) -> Response:
+        sid = request.path_params["sid"]
+        mid = request.path_params["mid"]
+        key = (sid, mid)
+        if key in self.messages:
+            return JSONResponse(self.messages[key])
+        return Response(status_code=404)
+
+    async def _permission_reply(self, request: Request) -> Response:
+        rid = request.path_params["rid"]
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        self.permission_replies.append({"request_id": rid, "body": body})
+        return JSONResponse({"ok": True})
+
 
 def _ensure_session_id(evt: dict[str, Any], sid: str) -> dict[str, Any]:
     """Add properties.sessionID if the test didn't bother to."""
@@ -150,5 +211,69 @@ def session_error(message: str) -> dict[str, Any]:
         "type": "session.error",
         "properties": {
             "error": {"name": "TestError", "data": {"message": message}},
+        },
+    }
+
+
+def tool_part_event(
+    call_id: str,
+    tool: str,
+    status: str,
+    *,
+    message_id: str = "msg_1",
+    tool_input: dict[str, Any] | None = None,
+    output: str | None = None,
+    error: str | None = None,
+    part_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a ``message.part.updated`` event for a tool part.
+
+    ``tool_input`` is required for ``running``/``completed``/``error``
+    statuses (mirrors the OpenCode schema); ``pending`` parts may omit it.
+    """
+    state: dict[str, Any] = {"status": status}
+    if tool_input is not None:
+        state["input"] = tool_input
+    if output is not None:
+        state["output"] = output
+    if error is not None:
+        state["error"] = error
+    part: dict[str, Any] = {
+        "type": "tool",
+        "id": part_id or f"prt_{call_id}",
+        "messageID": message_id,
+        "tool": tool,
+        "callID": call_id,
+        "state": state,
+    }
+    return {
+        "type": "message.part.updated",
+        "properties": {
+            "messageID": message_id,
+            "part": part,
+        },
+    }
+
+
+def permission_asked(
+    request_id: str,
+    category: str,
+    *,
+    call_id: str = "call_1",
+    message_id: str = "msg_1",
+    metadata: dict[str, Any] | None = None,
+    patterns: list[str] | None = None,
+    always: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a ``permission.asked`` event matching the OpenCode wire shape."""
+    return {
+        "type": "permission.asked",
+        "properties": {
+            "id": request_id,
+            "permission": category,
+            "patterns": patterns or [],
+            "metadata": metadata or {},
+            "always": always or [],
+            "tool": {"messageID": message_id, "callID": call_id},
         },
     }

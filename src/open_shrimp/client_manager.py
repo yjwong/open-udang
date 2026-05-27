@@ -23,13 +23,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (
+from open_shrimp.opencode_client import (
     CLIConnectionError,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
+    OpenCodeClient,
+    OpenCodeOptions,
     ProcessError,
     ResultMessage,
     SystemMessage,
+    split_provider_model,
 )
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
@@ -254,7 +255,7 @@ class CallbackContext:
 class AgentSession:
     """A long-lived SDK client associated with a chat scope."""
 
-    client: ClaudeSDKClient
+    client: OpenCodeClient
     session_id: str | None = None
     context_name: str = ""
     callback_context: CallbackContext = field(default_factory=CallbackContext)
@@ -275,21 +276,9 @@ _idle_sweep_task: asyncio.Task[None] | None = None
 _context_locks: dict[str, asyncio.Lock] = {}
 
 
-def _is_client_alive(client: ClaudeSDKClient) -> bool:
-    """Check if the CLI subprocess is still running.
-
-    Pokes into the transport's private state to detect a terminated
-    process.  Returns True if the process appears healthy or if the
-    state cannot be determined (fail-open).
-    """
+def _is_client_alive(client: OpenCodeClient) -> bool:
     try:
-        transport = client._transport
-        if transport is None:
-            return False
-        process = getattr(transport, "_process", None)
-        if process is None:
-            return False
-        return process.returncode is None
+        return client.is_alive()
     except Exception:
         return True
 
@@ -547,9 +536,11 @@ async def get_or_create_session(
                 cli_path,
             )
 
-    options = ClaudeAgentOptions(
+    _provider, _model = split_provider_model(context.model)
+    options = OpenCodeOptions(
         cwd=context.directory,
-        model=context.model,
+        provider=_provider,
+        model=_model,
         effort=context.effort,
         allowed_tools=allowed_tools,
         add_dirs=context.additional_directories,
@@ -712,7 +703,7 @@ async def get_or_create_session(
             context.directory,
         )
 
-    client = ClaudeSDKClient(options=options)
+    client = OpenCodeClient(options=options)
     try:
         await client.connect()
     except ProcessError:
@@ -728,7 +719,7 @@ async def get_or_create_session(
         )
         session_id = None
         options.resume = None
-        client = ClaudeSDKClient(options=options)
+        client = OpenCodeClient(options=options)
         await client.connect()
 
     session = AgentSession(

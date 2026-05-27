@@ -3,10 +3,9 @@
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
-_VALID_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+EffortLevel = str
 
 import yaml
 from platformdirs import user_config_path
@@ -152,10 +151,9 @@ def _validate_raw(raw: dict) -> None:
                     f"be strings, got: {d!r}"
                 )
         effort = ctx.get("effort")
-        if effort is not None and effort not in _VALID_EFFORT_LEVELS:
+        if effort is not None and not isinstance(effort, str):
             raise ValueError(
-                f"Context '{name}': effort must be one of "
-                f"{list(_VALID_EFFORT_LEVELS)}, got: {effort!r}"
+                f"Context '{name}': effort must be a string, got: {effort!r}"
             )
 
     # Validate container config

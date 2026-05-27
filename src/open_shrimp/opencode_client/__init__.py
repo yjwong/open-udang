@@ -11,15 +11,23 @@ from open_shrimp.opencode_client.events import (
     AssistantMessage,
     ContentBlock,
     Message,
+    PermissionResult,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ResultMessage,
     StreamEvent,
     SystemMessage,
     TextBlock,
+    ToolPermissionContext,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
-from open_shrimp.opencode_client.options import OpenCodeOptions
+from open_shrimp.opencode_client.options import (
+    OpenCodeOptions,
+    split_provider_model,
+)
+from open_shrimp.opencode_client.permission import PermissionBridge
 
 __all__ = [
     "OpenCodeClient",
@@ -38,4 +46,10 @@ __all__ = [
     "ProcessError",
     "OpenCodeAuthError",
     "OpenCodeNotFoundError",
+    "PermissionBridge",
+    "PermissionResult",
+    "PermissionResultAllow",
+    "PermissionResultDeny",
+    "ToolPermissionContext",
+    "split_provider_model",
 ]

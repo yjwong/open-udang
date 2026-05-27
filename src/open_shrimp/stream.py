@@ -16,18 +16,21 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from claude_agent_sdk import (
+from open_shrimp.opencode_client import (
     AssistantMessage,
     ResultMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
+# Background-task event types still live in the Claude Agent SDK; the
+# OpenCode wrapper doesn't synthesise them yet. The isinstance() arms
+# below compile and stay no-ops for wrapper-produced events.
 from claude_agent_sdk.types import (
     RateLimitEvent,
-    StreamEvent,
     TaskNotificationMessage,
     TaskProgressMessage,
     TaskStartedMessage,
@@ -914,13 +917,14 @@ async def stream_response(
 
             elif isinstance(event, StreamEvent):
                 # Token-level streaming: extract text deltas from raw
-                # Anthropic API stream events.
+                # OpenCode message.part.delta events (field=text).
                 raw = event.event
-                if raw.get("type") == "content_block_delta":
-                    delta = raw.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        text = delta.get("text", "")
-                        if text:
+                if (
+                    raw.get("type") == "message.part.delta"
+                    and (raw.get("properties") or {}).get("field") == "text"
+                ):
+                    text = (raw.get("properties") or {}).get("delta", "")
+                    if isinstance(text, str) and text:
                             # Insert a newline separator if this is
                             # the first text from a new assistant turn
                             # to prevent concatenation with the

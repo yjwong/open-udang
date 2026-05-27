@@ -1,6 +1,6 @@
-"""Claude Agent SDK wrapper for OpenShrimp.
+"""OpenCode-backed agent runner for OpenShrimp.
 
-Provides an async generator interface over ClaudeSDKClient that yields
+Provides an async generator interface over OpenCodeClient that yields
 streaming messages (text chunks, tool events, results) for the caller
 to consume and bridge to Telegram.
 """
@@ -14,16 +14,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
 
-from claude_agent_sdk import (
+from open_shrimp.opencode_client import (
     AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
+    OpenCodeClient,
+    OpenCodeOptions,
     ResultMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     UserMessage,
+    split_provider_model,
 )
-from claude_agent_sdk.types import StreamEvent
 
 
 from open_shrimp.config import ContextConfig
@@ -83,12 +84,7 @@ AgentEvent = Union[AssistantMessage, UserMessage, SystemMessage, ResultMessage, 
 
 
 def _sanitize_filename(name: str) -> str:
-    """Sanitize a filename for use in a temp file prefix.
-
-    Strips path separators, null bytes, and other characters that are
-    unsafe in file names, keeping only alphanumerics, hyphens, underscores,
-    and dots.
-    """
+    """Sanitize a filename for use in a temp file prefix."""
     return re.sub(r"[^\w.\-]", "_", name)
 
 
@@ -96,17 +92,7 @@ def save_attachments(
     attachments: list[FileAttachment],
     chat_id: int,
 ) -> list[Path]:
-    """Save file attachments to temp files and return their paths.
-
-    Files are saved into a per-chat subdirectory of
-    :data:`~open_shrimp.hooks.ATTACHMENT_TEMP_DIR` so the canUseTool hook
-    can auto-approve Read access for uploaded files without granting
-    access to the entire ``/tmp`` tree.  Per-chat scoping prevents one
-    agent session from accessing another session's uploads.
-
-    Files are created with delete=False so they persist for the agent to
-    read.  The caller is responsible for cleanup.
-    """
+    """Save file attachments to temp files and return their paths."""
     from open_shrimp.hooks import ATTACHMENT_TEMP_DIR
 
     chat_dir = ATTACHMENT_TEMP_DIR / str(chat_id)
@@ -115,7 +101,6 @@ def save_attachments(
     paths: list[Path] = []
     for att in attachments:
         ext = _MIME_TO_EXT.get(att.mime_type, ".bin")
-        # Use sanitized original filename as part of the temp name if available.
         safe_name = _sanitize_filename(att.filename) if att.filename else ""
         prefix = f"openshrimp_{safe_name}_" if safe_name else "openshrimp_"
         tmp = tempfile.NamedTemporaryFile(
@@ -165,32 +150,7 @@ async def run_agent(
     is_edit_auto_approved: Callable[[], bool] | None = None,
     notify_auto_approved_edit: EditNotifyCallback | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """Run the Claude agent and yield streaming events.
-
-    Args:
-        prompt: User message to send to Claude.
-        context: Context config with directory, model, allowed_tools.
-        request_approval: Async callback for interactive tool approval.
-        session_id: Optional session ID to resume a previous conversation.
-        attachments: Optional list of file attachments to include in the prompt.
-        handle_user_questions: Optional callback for AskUserQuestion tool.
-        is_edit_auto_approved: Optional callback returning True if the user
-            has opted into "accept all edits" for the current session.
-        notify_auto_approved_edit: Optional callback to display diffs for
-            auto-approved edits without blocking the agent.
-
-    Yields:
-        AgentEvent messages (AssistantMessage, SystemMessage, ResultMessage)
-        as they arrive from the SDK.
-
-    The caller should inspect each event:
-    - AssistantMessage: extract TextBlock content for streaming to Telegram.
-    - SystemMessage (subtype "init"): contains session_id for new sessions.
-    - ResultMessage: final result with session_id to persist.
-
-    Supports cancellation via asyncio task cancellation — the async with
-    block will clean up the client on CancelledError.
-    """
+    """Run the OpenCode-backed agent and yield streaming events."""
     can_use_tool = make_can_use_tool(
         request_approval=request_approval,
         cwd=context.directory,
@@ -201,11 +161,13 @@ async def run_agent(
     )
 
     def _log_stderr(line: str) -> None:
-        logger.info("CLI stderr: %s", line.rstrip())
+        logger.info("opencode stderr: %s", line.rstrip())
 
-    options = ClaudeAgentOptions(
+    provider, model = split_provider_model(context.model)
+    options = OpenCodeOptions(
         cwd=context.directory,
-        model=context.model,
+        provider=provider,
+        model=model,
         effort=context.effort,
         allowed_tools=context.allowed_tools,
         add_dirs=context.additional_directories,
@@ -233,7 +195,7 @@ async def run_agent(
     logger.info("Sending query: %s", actual_prompt[:200])
 
     try:
-        async with ClaudeSDKClient(options=options) as client:
+        async with OpenCodeClient(options=options) as client:
             await client.query(actual_prompt)
             async for message in client.receive_response():
                 yield message
@@ -245,7 +207,7 @@ async def run_agent(
                 e,
             )
             options.resume = None
-            async with ClaudeSDKClient(options=options) as client:
+            async with OpenCodeClient(options=options) as client:
                 await client.query(actual_prompt)
                 async for message in client.receive_response():
                     yield message
