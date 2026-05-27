@@ -524,15 +524,19 @@ def _extract_bash_output_text(
     return content
 
 
-def _format_bash_header(tool_input: dict[str, Any]) -> str:
+def _format_bash_header(
+    tool_input: dict[str, Any],
+    icon: str = "💻",
+    label: str = "Bash",
+) -> str:
     """Format a compact Bash header with command for the button message."""
     command = tool_input.get("command", "")
     description = tool_input.get("description", "")
 
     if description:
-        header = f"💻 **Bash:** {description}"
+        header = f"{icon} **{label}:** {description}"
     else:
-        header = "💻 **Bash**"
+        header = f"{icon} **{label}**"
 
     cmd_display = command[:200] + "..." if len(command) > 200 else command
     cmd_block = f"```bash\n{cmd_display}\n```"
@@ -542,6 +546,8 @@ def _format_bash_header(tool_input: dict[str, Any]) -> str:
 def _format_bash_output(
     tool_input: dict[str, Any],
     content: str | list[dict[str, Any]] | None,
+    icon: str = "💻",
+    label: str = "Bash",
 ) -> str:
     """Format Bash tool invocation and output as GFM.
 
@@ -550,7 +556,7 @@ def _format_bash_output(
     to BASH_OUTPUT_MAX_LINES / BASH_OUTPUT_MAX_CHARS, keeping the tail
     (most recent output) when truncation is needed.
     """
-    header_block = _format_bash_header(tool_input)
+    header_block = _format_bash_header(tool_input, icon=icon, label=label)
 
     output_text = _extract_bash_output_text(content).strip()
     if not output_text:
@@ -578,6 +584,8 @@ async def _send_bash_button(
     state: _DraftState,
     tool_input: dict[str, Any],
     content: str | list[dict[str, Any]] | None,
+    icon: str = "💻",
+    label: str = "Bash",
 ) -> None:
     """Send a compact Bash message with a 'Show output' inline button.
 
@@ -591,7 +599,7 @@ async def _send_bash_button(
     # Finalize any in-progress draft so the bash button appears in order.
     await finalize_and_reset(bot, state)
 
-    header = _format_bash_header(tool_input)
+    header = _format_bash_header(tool_input, icon=icon, label=label)
     header_chunks = gfm_to_telegram(header)
     header_text = header_chunks[0] if header_chunks else ""
 
@@ -624,7 +632,9 @@ async def _send_bash_button(
     # "running in background" message which isn't useful.
     if output_text and not is_background:
         callback_id = f"show_bash:{random.randint(1, 2**63 - 1)}"
-        _bash_output_store[callback_id] = _format_bash_output(tool_input, content)
+        _bash_output_store[callback_id] = _format_bash_output(
+            tool_input, content, icon=icon, label=label,
+        )
         buttons.append(
             InlineKeyboardButton("📋 Show output", callback_data=callback_id)
         )
@@ -888,6 +898,18 @@ async def stream_response(
                                 await _send_bash_button(
                                     bot, state, tool_input,
                                     block.content,
+                                )
+                            elif (
+                                tool_info
+                                and tool_info[0]
+                                == "mcp__openshrimp__host_bash"
+                            ):
+                                tool_input = tool_info[1]
+                                await _send_bash_button(
+                                    bot, state, tool_input,
+                                    block.content,
+                                    icon="🔓",
+                                    label="host_bash",
                                 )
 
             elif isinstance(event, StreamEvent):
