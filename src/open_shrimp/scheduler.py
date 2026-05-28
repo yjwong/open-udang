@@ -468,8 +468,11 @@ async def _run_scheduled_prompt(
     Creates an isolated session (not shared with interactive sessions),
     sends the prompt, and streams results to the chat.
     """
-    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-
+    from open_shrimp.opencode_client import (
+        OpenCodeClient,
+        OpenCodeOptions,
+        split_provider_model,
+    )
     from open_shrimp.stream import _DraftState, stream_response
 
     # Read-only tools by default. Bash is only allowed in containerized
@@ -484,26 +487,29 @@ async def _run_scheduled_prompt(
     if is_sandboxed(ctx_config):
         allowed_tools.append("Bash")
 
-    options = ClaudeAgentOptions(
+    def _log_stderr(line: str) -> None:
+        logger.info("opencode stderr (scheduled %s): %s", task.name, line.rstrip())
+
+    provider, model = split_provider_model(ctx_config.model)
+    options = OpenCodeOptions(
         cwd=ctx_config.directory,
-        model=ctx_config.model,
+        provider=provider,
+        model=model,
+        effort=ctx_config.effort,
         allowed_tools=allowed_tools,
         add_dirs=ctx_config.additional_directories,
         setting_sources=["project", "user", "local"],
         include_partial_messages=True,
+        stderr=_log_stderr,
         max_buffer_size=10 * 1024 * 1024,  # 10MB
-        system_prompt={
-            "type": "preset",
-            "preset": "claude_code",
-            "append": (
-                f"You are running as a scheduled task named '{task.name}'. "
-                f"This is an automated execution — there is no human watching. "
-                f"Be concise and focused. Report findings clearly."
-            ),
-        },
+        system_prompt=(
+            f"You are running as a scheduled task named '{task.name}'. "
+            f"This is an automated execution — there is no human watching. "
+            f"Be concise and focused. Report findings clearly."
+        ),
     )
 
-    client = ClaudeSDKClient(options=options)
+    client = OpenCodeClient(options=options)
     try:
         await client.connect()
         await client.query(task.prompt)

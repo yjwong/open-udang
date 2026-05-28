@@ -28,6 +28,7 @@ from open_shrimp.opencode_client.options import (
     split_provider_model,
 )
 from open_shrimp.opencode_client.permission import PermissionBridge
+from open_shrimp.opencode_client.sessions import SessionInfo, list_sessions
 
 __all__ = [
     "OpenCodeClient",
@@ -50,6 +51,8 @@ __all__ = [
     "PermissionResult",
     "PermissionResultAllow",
     "PermissionResultDeny",
+    "SessionInfo",
     "ToolPermissionContext",
+    "list_sessions",
     "split_provider_model",
 ]

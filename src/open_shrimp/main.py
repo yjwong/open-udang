@@ -141,17 +141,6 @@ async def run_bot_async(config_path: str, stop_event: asyncio.Event | None = Non
     and the macOS menu-bar app.  When *stop_event* is ``None`` (the CLI
     path), SIGTERM/SIGINT handlers are installed automatically.
     """
-    # Patch SDK before any clients are created (workaround for #810).
-    from open_shrimp.sdk_patches import apply as apply_sdk_patches
-    apply_sdk_patches()
-
-    # Enable prompt_suggestion frames (CLI feature not yet exposed by
-    # the Python SDK).  Order matters: sdk_patches subclasses the
-    # transport, so installing read_messages override on the resulting
-    # class must happen after.
-    from open_shrimp.prompt_suggestion import install_patches as install_suggestion_patches
-    install_suggestion_patches()
-
     config = load_config(config_path)
     logger.info("Config loaded from %s", config_path)
     logger.info("Contexts: %s", ", ".join(config.contexts.keys()))

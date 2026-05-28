@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from claude_agent_sdk.types import (
+from open_shrimp.opencode_client.events import (
     PermissionResult,
     PermissionResultAllow,
     PermissionResultDeny,
@@ -272,9 +272,9 @@ def matches_approval_rule(
 # Tools that access the filesystem, mapped to the input key(s) containing
 # the path to check. Each value is a list of keys to try (first match wins).
 _PATH_SCOPED_TOOLS: dict[str, list[str]] = {
-    "Read": ["file_path"],
-    "Write": ["file_path"],
-    "Edit": ["file_path"],
+    "Read": ["filePath"],
+    "Write": ["filePath"],
+    "Edit": ["filePath"],
     "Glob": ["path"],     # optional; defaults to cwd when absent
     "Grep": ["path"],     # optional; defaults to cwd when absent
 }

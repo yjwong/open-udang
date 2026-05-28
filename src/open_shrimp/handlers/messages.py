@@ -19,7 +19,7 @@ from open_shrimp.agent import (
     save_attachments,
 )
 from open_shrimp.stt import transcribe as stt_transcribe
-from claude_agent_sdk import CLIConnectionError, ProcessError
+from open_shrimp.opencode_client import CLIConnectionError, ProcessError
 from open_shrimp.client_manager import (
     CallbackContext,
     close_session,

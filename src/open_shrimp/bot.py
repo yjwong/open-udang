@@ -110,42 +110,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         await handle_update_callback(query, data, config)
         return
 
-    from open_shrimp.prompt_suggestion import CALLBACK_PREFIX as _SUGGEST_PREFIX
-    if data.startswith(_SUGGEST_PREFIX):
-        await _handle_suggestion_callback(query, data)
-        return
-
     # Unknown callback — ignore silently
     logger.debug("Unhandled callback data: %s", data)
-
-
-async def _handle_suggestion_callback(query: Any, data: str) -> None:
-    """Handle a user tapping the prompt-suggestion inline button."""
-    from open_shrimp.dispatch_registry import dispatch
-    from open_shrimp.handlers.utils import chat_scope_from_message
-    from open_shrimp.prompt_suggestion import CALLBACK_PREFIX, pop_suggestion
-
-    text = pop_suggestion(data.removeprefix(CALLBACK_PREFIX))
-    if not text:
-        await query.answer("Suggestion expired.")
-        return
-
-    await query.answer()
-
-    if not query.message:
-        return
-
-    # Remove the keyboard so the same suggestion can't be sent twice.
-    try:
-        await query.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        logger.debug("Failed to remove suggestion keyboard")
-
-    scope = chat_scope_from_message(query.message)
-    try:
-        await dispatch(text, scope.chat_id, scope.thread_id)
-    except Exception:
-        logger.exception("Failed to dispatch suggestion for scope %s", scope)
 
 
 # ── Config hot-reload ──

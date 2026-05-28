@@ -3,17 +3,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any, Literal, Union
 
-# Re-export the SDK's permission types so hooks.py (which constructs
-# PermissionResultAllow/PermissionResultDeny from the SDK) and our bridge
-# (which isinstance-matches the results) see the same classes.
-from claude_agent_sdk.types import (
-    PermissionResult,
-    PermissionResultAllow,
-    PermissionResultDeny,
-    ToolPermissionContext,
-)
+
+@dataclass
+class ToolPermissionContext:
+    signal: Any | None = None
+    suggestions: list[Any] = field(default_factory=list)
+    tool_use_id: str | None = None
+    agent_id: str | None = None
+
+
+@dataclass
+class PermissionResultAllow:
+    # updated_input / updated_permissions are accepted for SDK-callback
+    # signature parity but ignored by the OpenCode bridge.
+    behavior: Literal["allow"] = "allow"
+    updated_input: dict[str, Any] | None = None
+    updated_permissions: list[Any] | None = None
+
+
+@dataclass
+class PermissionResultDeny:
+    behavior: Literal["deny"] = "deny"
+    message: str = ""
+    interrupt: bool = False
+
+
+PermissionResult = Union[PermissionResultAllow, PermissionResultDeny]
 
 
 @dataclass

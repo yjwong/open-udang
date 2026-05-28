@@ -45,10 +45,14 @@ class MockOpenCode:
         # Whether new subscribers should receive the initial server.connected.
         self.send_initial_connected = True
 
+        # Canned rows returned by GET /session; tests assign directly.
+        self.session_rows: list[dict[str, Any]] = []
+
         self.app = Starlette(
             routes=[
                 Route("/event", self._event_stream),
                 Route("/session", self._create_session, methods=["POST"]),
+                Route("/session", self._list_sessions, methods=["GET"]),
                 Route(
                     "/session/{sid}",
                     self._patch_session,
@@ -180,6 +184,21 @@ class MockOpenCode:
             body = {}
         self.permission_replies.append({"request_id": rid, "body": body})
         return JSONResponse({"ok": True})
+
+    async def _list_sessions(self, request: Request) -> Response:
+        # Real OpenCode does an exact directory match; mirror it.
+        directory = request.query_params.get("directory")
+        limit_raw = request.query_params.get("limit")
+        try:
+            limit = int(limit_raw) if limit_raw is not None else None
+        except ValueError:
+            limit = None
+        rows = self.session_rows
+        if directory is not None:
+            rows = [r for r in rows if r.get("directory") == directory]
+        if limit is not None:
+            rows = rows[:limit]
+        return JSONResponse(rows)
 
 
 def _ensure_session_id(evt: dict[str, Any], sid: str) -> dict[str, Any]:

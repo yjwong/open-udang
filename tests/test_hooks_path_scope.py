@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from claude_agent_sdk.types import (
+from open_shrimp.opencode_client.events import (
     PermissionResultAllow,
     PermissionResultDeny,
     ToolPermissionContext,
@@ -43,17 +43,17 @@ def _ctx(tool_use_id: str = "tu_1") -> ToolPermissionContext:
 class TestSuggestedSessionDir:
     def test_read_returns_parent_of_file(self) -> None:
         assert _suggested_session_dir(
-            "Read", {"file_path": "/etc/passwd"},
+            "Read", {"filePath": "/etc/passwd"},
         ) == "/etc"
 
     def test_edit_returns_parent_of_file(self) -> None:
         assert _suggested_session_dir(
-            "Edit", {"file_path": "/var/log/syslog"},
+            "Edit", {"filePath": "/var/log/syslog"},
         ) == "/var/log"
 
     def test_write_returns_parent_of_file(self) -> None:
         assert _suggested_session_dir(
-            "Write", {"file_path": "/tmp/out.txt"},
+            "Write", {"filePath": "/tmp/out.txt"},
         ) == "/tmp"
 
     def test_glob_returns_path_itself(self) -> None:
@@ -88,7 +88,7 @@ class TestMakeCanUseToolPathScope:
         )
         target = tmp_path / "f.txt"
         target.write_text("x")
-        result = await can_use("Read", {"file_path": str(target)}, _ctx())
+        result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultAllow)
         request_approval.assert_not_awaited()
 
@@ -104,7 +104,7 @@ class TestMakeCanUseToolPathScope:
             cwd=str(cwd),
             additional_directories=[str(extra)],
         )
-        result = await can_use("Read", {"file_path": str(target)}, _ctx())
+        result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultAllow)
         request_approval.assert_not_awaited()
 
@@ -117,7 +117,7 @@ class TestMakeCanUseToolPathScope:
             request_approval=request_approval,
             cwd=str(cwd),
         )
-        result = await can_use("Read", {"file_path": str(target)}, _ctx())
+        result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultAllow)
         request_approval.assert_awaited_once()
         # Suggested dir is the parent of the file (Claude Code parity).
@@ -151,7 +151,7 @@ class TestMakeCanUseToolPathScope:
             cwd=str(tmp_path),
         )
         target = tmp_path / "f.txt"; target.write_text("x")
-        await can_use("Read", {"file_path": str(target)}, _ctx())
+        await can_use("Read", {"filePath": str(target)}, _ctx())
         request_approval.assert_not_awaited()
 
 
@@ -177,7 +177,7 @@ class TestPathToolGateBlocksBlanketRule:
             cwd=str(cwd),
             is_tool_auto_approved=lambda tn, ti: tn == "Read",
         )
-        result = await can_use("Read", {"file_path": str(target)}, _ctx())
+        result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultDeny)
         request_approval.assert_awaited_once()
 
@@ -216,7 +216,7 @@ class TestSessionApprovedDirs:
             cwd=str(cwd),
             get_session_approved_dirs=lambda: [str(approved)],
         )
-        result = await can_use("Read", {"file_path": str(target)}, _ctx())
+        result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultAllow)
         request_approval.assert_not_awaited()
 
@@ -238,7 +238,7 @@ class TestSessionApprovedDirs:
         )
         result = await can_use(
             "Edit",
-            {"file_path": str(target), "old_string": "x", "new_string": "y"},
+            {"filePath": str(target), "oldString": "x", "newString": "y"},
             _ctx(),
         )
         assert isinstance(result, PermissionResultAllow)
@@ -260,7 +260,7 @@ class TestSessionApprovedDirs:
         )
         await can_use(
             "Edit",
-            {"file_path": str(target), "old_string": "x", "new_string": "y"},
+            {"filePath": str(target), "oldString": "x", "newString": "y"},
             _ctx(),
         )
         request_approval.assert_awaited_once()
@@ -281,12 +281,12 @@ class TestSessionApprovedDirs:
             get_session_approved_dirs=lambda: list(dirs),
         )
         # First call: dirs empty -> prompt.
-        result1 = await can_use("Read", {"file_path": str(target)}, _ctx("a"))
+        result1 = await can_use("Read", {"filePath": str(target)}, _ctx("a"))
         assert isinstance(result1, PermissionResultDeny)
         # User clicks the dir button — simulate by mutating dirs.
         dirs.append(str(approved))
         # Second call: now in scope -> auto-approve.
-        result2 = await can_use("Read", {"file_path": str(target)}, _ctx("b"))
+        result2 = await can_use("Read", {"filePath": str(target)}, _ctx("b"))
         assert isinstance(result2, PermissionResultAllow)
 
 

@@ -97,9 +97,9 @@ def _format_edit_approval(
     tool_input: dict[str, Any], cwd: str | None = None,
 ) -> str:
     """Format an Edit tool call as a unified diff for the approval prompt."""
-    file_path = _relative_path(tool_input.get("file_path", "unknown"), cwd)
-    old_string = tool_input.get("old_string", "")
-    new_string = tool_input.get("new_string", "")
+    file_path = _relative_path(tool_input.get("filePath", "unknown"), cwd)
+    old_string = tool_input.get("oldString", "")
+    new_string = tool_input.get("newString", "")
 
     escaped_path = _escape_mdv2(file_path)
     header = f"\u270f\ufe0f *Edit:* `{escaped_path}`"
@@ -178,7 +178,7 @@ def _format_write_approval(
     tool_input: dict[str, Any], cwd: str | None = None,
 ) -> str:
     """Format a Write tool call for the approval prompt."""
-    file_path = _relative_path(tool_input.get("file_path", "unknown"), cwd)
+    file_path = _relative_path(tool_input.get("filePath", "unknown"), cwd)
     content = tool_input.get("content", "")
 
     escaped_path = _escape_mdv2(file_path)

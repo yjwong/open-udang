@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -17,11 +17,10 @@ def _make_inputs(*responses: str):
     return lambda prompt="": next(it)
 
 
-@patch("open_shrimp.setup._check_1m_available", return_value=False)
 class TestRunSetupWizard:
     """End-to-end tests for run_setup_wizard."""
 
-    def test_creates_valid_config(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_creates_valid_config(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",  # token
@@ -51,7 +50,7 @@ class TestRunSetupWizard:
         assert review["tunnel"] == "cloudflared"
         assert 49152 <= review["port"] <= 65535
 
-    def test_uses_defaults(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_uses_defaults(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",  # token
@@ -70,7 +69,7 @@ class TestRunSetupWizard:
         assert raw["contexts"]["default"]["description"] == "Default context"
         assert "model" not in raw["contexts"]["default"]
 
-    def test_custom_model(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_custom_model(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",  # token
@@ -88,26 +87,7 @@ class TestRunSetupWizard:
         raw = yaml.safe_load(config_path.read_text())
         assert raw["contexts"]["default"]["model"] == "claude-custom-model"
 
-    def test_1m_upgrade_when_available(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
-        """When [1m] is available, the model should be upgraded."""
-        _mock_1m.return_value = True
-        config_path = tmp_path / "config.yaml"
-        inputs = _make_inputs(
-            "111:AAA-bbb",  # token
-            "42",  # user ID
-            "default",  # context name
-            "/tmp",  # directory
-            "test",  # description
-            "3",  # model choice (opus)
-        )
-
-        with patch("builtins.input", side_effect=inputs):
-            run_setup_wizard(config_path)
-
-        raw = yaml.safe_load(config_path.read_text())
-        assert raw["contexts"]["default"]["model"] == "opus[1m]"
-
-    def test_ctrl_c_cancels(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_ctrl_c_cancels(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
 
         with patch("builtins.input", side_effect=KeyboardInterrupt):
@@ -117,7 +97,7 @@ class TestRunSetupWizard:
 
         assert not config_path.exists()
 
-    def test_eof_cancels(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_eof_cancels(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
 
         with patch("builtins.input", side_effect=EOFError):
@@ -127,7 +107,7 @@ class TestRunSetupWizard:
 
         assert not config_path.exists()
 
-    def test_invalid_token_reprompts(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_invalid_token_reprompts(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "bad-token",  # invalid (no colon)
@@ -145,7 +125,7 @@ class TestRunSetupWizard:
         raw = yaml.safe_load(config_path.read_text())
         assert raw["telegram"]["token"] == "111:AAA-bbb"
 
-    def test_invalid_user_id_reprompts(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_invalid_user_id_reprompts(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",  # token
@@ -164,7 +144,7 @@ class TestRunSetupWizard:
         raw = yaml.safe_load(config_path.read_text())
         assert raw["allowed_users"] == [42]
 
-    def test_invalid_directory_reprompts(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_invalid_directory_reprompts(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",  # token
@@ -182,7 +162,7 @@ class TestRunSetupWizard:
         raw = yaml.safe_load(config_path.read_text())
         assert raw["contexts"]["default"]["directory"] == "/tmp"
 
-    def test_creates_parent_directories(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_creates_parent_directories(self, tmp_path: Path) -> None:
         config_path = tmp_path / "deep" / "nested" / "config.yaml"
         inputs = _make_inputs(
             "111:AAA-bbb",
@@ -198,7 +178,7 @@ class TestRunSetupWizard:
 
         assert config_path.exists()
 
-    def test_tilde_directory_accepted(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_tilde_directory_accepted(self, tmp_path: Path) -> None:
         """Tilde paths like ~/projects should be accepted and resolved."""
         config_path = tmp_path / "config.yaml"
         inputs = _make_inputs(
@@ -219,7 +199,7 @@ class TestRunSetupWizard:
         assert "~" not in resolved
         assert Path(resolved).is_absolute()
 
-    def test_config_roundtrips_through_load(self, _mock_1m: MagicMock, tmp_path: Path) -> None:
+    def test_config_roundtrips_through_load(self, tmp_path: Path) -> None:
         """The wizard-generated config should pass load_config validation."""
         from open_shrimp.config import load_config
 

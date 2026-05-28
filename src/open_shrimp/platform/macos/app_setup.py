@@ -65,7 +65,6 @@ _MODELS: tuple[tuple[str | None, str], ...] = (
     ("opus", "Most capable, slower"),
     ("haiku", "Fastest, least capable"),
 )
-_1M_CANDIDATES = {"sonnet", "opus"}
 
 # Module-level reference to prevent GC of the active controller.
 _active_controller: Any = None
@@ -262,7 +261,6 @@ class SetupWizardController(NSObject):
         # Collected data
         self._verified_bot_name: str | None = None
         self._selected_directory: str | None = None
-        self._resolved_model: str | None = None  # set after 1M probe
 
         # UI references (set during build)
         self._window: NSWindow | None = None
@@ -288,8 +286,6 @@ class SetupWizardController(NSObject):
         self._custom_model_field: NSTextField | None = None
         self._custom_model_label: NSTextField | None = None
         self._context_error: NSTextField | None = None
-        self._model_status: NSTextField | None = None
-        self._model_spinner: NSProgressIndicator | None = None
 
         return self
 
@@ -628,18 +624,6 @@ class SetupWizardController(NSObject):
         self._custom_model_field.setHidden_(True)
         view.addSubview_(self._custom_model_field)
 
-        # Model status (1M probe result)
-        y -= 20
-        self._model_status = _make_label(
-            "",
-            (0, y, w - 24, 18),
-            font=NSFont.systemFontOfSize_(11),
-        )
-        view.addSubview_(self._model_status)
-
-        self._model_spinner = _make_spinner((w - 20, y, 16, 16))
-        view.addSubview_(self._model_spinner)
-
         # Error
         self._context_error = _make_label(
             "",
@@ -668,11 +652,6 @@ class SetupWizardController(NSObject):
             return
 
         if self._current_step == self._num_steps - 1:
-            # Last step — check if 1M probe is needed
-            model = self._get_selected_model()
-            if model in _1M_CANDIDATES and self._resolved_model is None:
-                self._probe_1m(model)
-                return
             self._finish()
             return
 
@@ -818,50 +797,12 @@ class SetupWizardController(NSObject):
         self._token_error.setStringValue_(error)
         self._token_error.setHidden_(False)
 
-    # ── Async 1M Probe ──
-
-    @objc.python_method
-    def _probe_1m(self, model: str) -> None:
-        """Check if the model supports the [1m] context variant."""
-        self._model_status.setStringValue_(f"Checking {model}[1m] availability…")
-        self._model_status.setTextColor_(NSColor.secondaryLabelColor())
-        self._model_spinner.startAnimation_(None)
-        self._next_button.setEnabled_(False)
-
-        def _check() -> None:
-            from open_shrimp.setup import _check_1m_available
-
-            available = _check_1m_available(model)
-            resolved = f"{model}[1m]" if available else model
-            self._resolved_model = resolved
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "onProbeComplete:", resolved, False,
-            )
-
-        threading.Thread(target=_check, daemon=True).start()
-
-    def onProbeComplete_(self, resolved_model: str) -> None:
-        self._model_spinner.stopAnimation_(None)
-        self._next_button.setEnabled_(True)
-        if "[1m]" in resolved_model:
-            self._model_status.setStringValue_(f"Using {resolved_model} (1M context)")
-            self._model_status.setTextColor_(NSColor.systemGreenColor())
-        else:
-            self._model_status.setStringValue_(
-                f"1M context not available — using {resolved_model}"
-            )
-            self._model_status.setTextColor_(NSColor.secondaryLabelColor())
-        self._finish()
-
     # ── Model Selection ──
 
     def modelChanged_(self, sender: Any) -> None:
         is_custom = sender.indexOfSelectedItem() == len(_MODELS)
         self._custom_model_field.setHidden_(not is_custom)
         self._custom_model_label.setHidden_(not is_custom)
-        # Reset 1M probe state when model changes
-        self._resolved_model = None
-        self._model_status.setStringValue_("")
 
     @objc.python_method
     def _get_selected_model(self) -> str | None:
@@ -908,7 +849,7 @@ class SetupWizardController(NSObject):
         user_id = int(self._userid_field.stringValue().strip())
         context_name = self._context_name_field.stringValue().strip()
         directory = self._selected_directory
-        model = self._resolved_model or self._get_selected_model()
+        model = self._get_selected_model()
 
         config_dict = _build_config_dict(
             token=token,

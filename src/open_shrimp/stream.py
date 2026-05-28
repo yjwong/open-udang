@@ -26,15 +26,6 @@ from open_shrimp.opencode_client import (
     ToolUseBlock,
     UserMessage,
 )
-# Background-task event types still live in the Claude Agent SDK; the
-# OpenCode wrapper doesn't synthesise them yet. The isinstance() arms
-# below compile and stay no-ops for wrapper-produced events.
-from claude_agent_sdk.types import (
-    RateLimitEvent,
-    TaskNotificationMessage,
-    TaskProgressMessage,
-    TaskStartedMessage,
-)
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 
@@ -44,35 +35,6 @@ from open_shrimp.markdown import gfm_to_telegram
 from open_shrimp.web_app_button import make_web_app_button
 
 logger = logging.getLogger(__name__)
-
-
-def _is_auto_promoted_fg_bash(
-    state: "_DraftState",
-    event: "TaskStartedMessage | TaskProgressMessage | TaskNotificationMessage",
-) -> bool:
-    """Detect SDK auto-promotion of slow foreground Bash to a task.
-
-    Why: Claude Code CLI 2.1.117 (bundled with claude-agent-sdk 0.1.65)
-    silently wraps long-running foreground Bash in ``task_started`` /
-    ``task_notification`` events even when ``run_in_background`` was not
-    set. Those auto-promoted tasks have an empty ``output_file`` and no
-    ``.output`` file on disk — the regular Bash tool-result flow already
-    rendered the output. Without this filter we'd post ⏳ + 📋 noise and
-    a "View output" button that 404s. Reported upstream as
-    anthropics/claude-code#31518 (closed without fix).
-    """
-    # Only TaskStartedMessage carries task_type; TaskProgressMessage and
-    # TaskNotificationMessage don't, so for those we rely on the task_id
-    # we recorded when the started event was suppressed.
-    task_type = getattr(event, "task_type", None)
-    if task_type is None:
-        return event.task_id in state.suppressed_task_ids
-    if task_type != "local_bash" or not event.tool_use_id:
-        return False
-    info = state.tool_use_map.get(event.tool_use_id)
-    if info is None or info[0] != "Bash":
-        return False
-    return not info[1].get("run_in_background")
 
 
 def _is_thread_not_found(exc: BaseException) -> bool:
@@ -99,65 +61,6 @@ _SUPPRESS_NOTIFICATION_TOOLS: set[str] = {"Bash", "Edit", "Write"}
 # Stored Bash outputs for on-demand reveal via inline keyboard button.
 # Keyed by a unique callback ID, value is the formatted GFM output string.
 _bash_output_store: dict[str, str] = {}
-
-
-def _register_suggestion_for_turn(
-    *,
-    bot: Bot,
-    chat_id: int,
-    message_id: int,
-    session_id: str,
-) -> None:
-    """Arrange for the next prompt_suggestion frame to add an inline button.
-
-    The CLI emits a ``prompt_suggestion`` frame asynchronously after the
-    result.  When it arrives, the handler edits the supplied
-    ``message_id`` (the last message of the just-finished turn) to add a
-    single inline button labelled with the suggestion.  Tapping the
-    button dispatches the suggestion text as the user's next message.
-    """
-    from open_shrimp.prompt_suggestion import (
-        CALLBACK_PREFIX,
-        register_handler,
-        store_suggestion,
-    )
-
-    async def handler(suggestion: str) -> None:
-        suggestion = suggestion.strip()
-        if not suggestion:
-            return
-        suggest_id = store_suggestion(suggestion)
-        # Telegram caps button labels at 64 bytes UTF-8; truncate with
-        # an ellipsis to stay safely under.
-        encoded = suggestion.encode("utf-8")
-        if len(encoded) > 60:
-            label = encoded[:57].decode("utf-8", errors="ignore") + "…"
-        else:
-            label = suggestion
-        button = InlineKeyboardButton(
-            f"💡 {label}", callback_data=f"{CALLBACK_PREFIX}{suggest_id}",
-        )
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=InlineKeyboardMarkup([[button]]),
-            )
-        except BadRequest as e:
-            # Common: "message is not modified" if a previous edit
-            # already attached a keyboard, or "message to edit not
-            # found" if the user deleted the message.  Both are benign.
-            logger.debug(
-                "Skipped suggestion edit for chat %d msg %d: %s",
-                chat_id, message_id, e,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to attach suggestion button for chat %d msg %d",
-                chat_id, message_id,
-            )
-
-    register_handler(session_id, handler)
 
 
 @dataclass
@@ -214,15 +117,6 @@ class _DraftState:
     tool_use_map: dict[str, tuple[str, dict[str, Any]]] = field(
         default_factory=dict
     )
-    # tool_use_ids of background agent tasks.  Messages with a matching
-    # parent_tool_use_id are suppressed from the Telegram chat (the user
-    # can watch progress via the terminal viewer instead).
-    bg_task_tool_use_ids: set[str] = field(default_factory=set)
-    # task_ids of auto-promoted foreground Bash tasks (see
-    # _is_auto_promoted_fg_bash).  Only TaskStartedMessage carries
-    # task_type, so we record the id here at started-time and skip the
-    # matching TaskProgressMessage / TaskNotificationMessage events.
-    suppressed_task_ids: set[str] = field(default_factory=set)
     # Fields for web_app button fallback in group chats.
     user_id: int = 0
     is_private_chat: bool = True
@@ -460,7 +354,7 @@ def extract_tool_summary(
 ) -> str:
     """Extract a brief summary from tool input for notifications."""
     if tool_name == "Read":
-        return _relative_path(tool_input.get("file_path", ""), cwd)
+        return _relative_path(tool_input.get("filePath", ""), cwd)
     if tool_name == "Glob":
         return tool_input.get("pattern", "")
     if tool_name == "Grep":
@@ -473,7 +367,7 @@ def extract_tool_summary(
         cmd = tool_input.get("command", "")
         return cmd[:80] + ("..." if len(cmd) > 80 else "")
     if tool_name == "Write" or tool_name == "Edit":
-        return _relative_path(tool_input.get("file_path", ""), cwd)
+        return _relative_path(tool_input.get("filePath", ""), cwd)
     if tool_name == "LSP":
         return tool_input.get("command", "")
     if tool_name == "Agent":
@@ -808,16 +702,6 @@ async def stream_response(
         draft_task = asyncio.create_task(periodic_flush())
 
         async for event in events:
-            # Suppress sub-agent messages from background tasks.
-            _parent = getattr(event, "parent_tool_use_id", None)
-            if _parent and _parent in state.bg_task_tool_use_ids:
-                # Still capture session_id from any message type.
-                sid = getattr(event, "session_id", None)
-                if sid:
-                    state.session_id = sid
-                    result.session_id = sid
-                continue
-
             if isinstance(event, AssistantMessage):
                 # Capture per-turn token usage.
                 turn_usage = event.usage
@@ -970,188 +854,6 @@ async def stream_response(
                     state.session_id = sid
                     result.session_id = sid
 
-                if isinstance(event, TaskStartedMessage):
-                    if _is_auto_promoted_fg_bash(state, event):
-                        state.suppressed_task_ids.add(event.task_id)
-                        logger.debug(
-                            "Skipping auto-promoted FG bash task %s for "
-                            "chat %d (tool_use_id=%s)",
-                            event.task_id,
-                            state.chat_id,
-                            event.tool_use_id,
-                        )
-                        continue
-                    logger.info(
-                        "Background task started %s (%s) for chat %d: %s",
-                        event.task_id,
-                        event.task_type,
-                        state.chat_id,
-                        event.description,
-                    )
-                    # Track the task.
-                    if scope is not None:
-                        import time
-
-                        from open_shrimp.handlers.state import (
-                            TrackedTask,
-                            _active_bg_tasks,
-                        )
-
-                        scope_tasks = _active_bg_tasks.setdefault(scope, {})
-                        scope_tasks[event.task_id] = TrackedTask(
-                            task_id=event.task_id,
-                            description=event.description,
-                            task_type=event.task_type,
-                            started_at=time.monotonic(),
-                            tool_use_id=event.tool_use_id,
-                            session_id=event.session_id,
-                        )
-                    # Record tool_use_id so sub-agent messages are
-                    # suppressed from the Telegram chat.
-                    if event.tool_use_id and event.task_type in (
-                        "local_agent", "remote_agent",
-                    ):
-                        state.bg_task_tool_use_ids.add(event.tool_use_id)
-                    # Send Telegram notification.
-                    await finalize_and_reset(bot, state)
-                    try:
-                        desc = event.description or "Background task"
-                        chunks = gfm_to_telegram(f"⏳ {desc}")
-                        text = chunks[0] if chunks else f"⏳ {desc}"
-                        buttons: list[InlineKeyboardButton] = []
-                        if terminal_base_url:
-                            task_type_param = (
-                                f"&task_type={event.task_type}"
-                                if event.task_type
-                                else ""
-                            )
-                            app_url = (
-                                f"{terminal_base_url}/terminal/"
-                                f"?type=task&id={event.task_id}"
-                                f"{task_type_param}"
-                            )
-                            buttons.append(
-                                make_web_app_button(
-                                    "📺 View output",
-                                    app_url,
-                                    chat_id=state.chat_id,
-                                    user_id=state.user_id,
-                                    bot_token=state.bot_token,
-                                    is_private_chat=state.is_private_chat,
-                                )
-                            )
-                        keyboard = (
-                            InlineKeyboardMarkup([buttons])
-                            if buttons
-                            else None
-                        )
-                        await bot.send_message(
-                            chat_id=state.chat_id,
-                            text=text,
-                            parse_mode="MarkdownV2",
-                            reply_markup=keyboard,
-                            disable_notification=True,
-                            **state._thread_kwargs,
-                        )
-                    except Exception as e:
-                        if _is_thread_not_found(e):
-                            raise
-                        logger.exception(
-                            "Failed to send task started message"
-                        )
-
-                elif isinstance(event, TaskProgressMessage):
-                    if _is_auto_promoted_fg_bash(state, event):
-                        continue
-                    logger.debug(
-                        "Background task progress %s for chat %d: "
-                        "last_tool=%s",
-                        event.task_id,
-                        state.chat_id,
-                        event.last_tool_name,
-                    )
-                    if scope is not None:
-                        from open_shrimp.handlers.state import _active_bg_tasks
-
-                        scope_tasks = _active_bg_tasks.get(scope)
-                        if scope_tasks and event.task_id in scope_tasks:
-                            scope_tasks[event.task_id].last_tool_name = (
-                                event.last_tool_name
-                            )
-
-                elif isinstance(event, TaskNotificationMessage):
-                    if _is_auto_promoted_fg_bash(state, event):
-                        state.suppressed_task_ids.discard(event.task_id)
-                        continue
-                    logger.info(
-                        "Background task %s %s for chat %d: %s",
-                        event.task_id,
-                        event.status,
-                        state.chat_id,
-                        event.summary,
-                    )
-                    # Remove from tracking state.
-                    if scope is not None:
-                        from open_shrimp.handlers.state import _active_bg_tasks
-
-                        scope_tasks = _active_bg_tasks.get(scope)
-                        if scope_tasks:
-                            scope_tasks.pop(event.task_id, None)
-                            if not scope_tasks:
-                                _active_bg_tasks.pop(scope, None)
-                    await finalize_and_reset(bot, state)
-                    try:
-                        summary = event.summary or event.status
-                        chunks = gfm_to_telegram(f"📋 {summary}")
-                        text = chunks[0] if chunks else f"📋 {summary}"
-                        await bot.send_message(
-                            chat_id=state.chat_id,
-                            text=text,
-                            parse_mode="MarkdownV2",
-                            disable_notification=True,
-                            **state._thread_kwargs,
-                        )
-                    except Exception as e:
-                        if _is_thread_not_found(e):
-                            raise
-                        logger.exception(
-                            "Failed to send task notification message"
-                        )
-
-            elif isinstance(event, RateLimitEvent):
-                info = event.rate_limit_info
-                if info.status == "rejected":
-                    logger.warning(
-                        "Rate limit hit (%s) for chat %d, resets at %s",
-                        info.rate_limit_type,
-                        state.chat_id,
-                        info.resets_at,
-                    )
-                    await finalize_and_reset(bot, state)
-                    try:
-                        await bot.send_message(
-                            chat_id=state.chat_id,
-                            text="⚠️ Rate limit reached\\. Waiting for reset\\.",
-                            parse_mode="MarkdownV2",
-                            disable_notification=True,
-                            **state._thread_kwargs,
-                        )
-                    except Exception as e:
-                        if _is_thread_not_found(e):
-                            raise
-                        logger.exception("Failed to send rate limit message")
-                elif info.status == "allowed_warning":
-                    pct = (
-                        f" ({info.utilization:.0%})"
-                        if info.utilization is not None
-                        else ""
-                    )
-                    logger.info(
-                        "Rate limit warning%s for chat %d",
-                        pct,
-                        state.chat_id,
-                    )
-
     finally:
         if draft_task:
             draft_task.cancel()
@@ -1164,18 +866,6 @@ async def stream_response(
         if state.raw_text.strip():
             msg_ids = await _finalize_message(bot, state, silent=False)
             state.sent_message_ids.extend(msg_ids)
-
-        # Register a prompt_suggestion handler against the last assistant
-        # message of this turn.  The CLI emits the suggestion ~1.5 s after
-        # the result frame, well after this function returns; the handler
-        # is a closure that edits the message-id snapshot we have right now.
-        if state.session_id and state.sent_message_ids:
-            _register_suggestion_for_turn(
-                bot=bot,
-                chat_id=state.chat_id,
-                message_id=state.sent_message_ids[-1],
-                session_id=state.session_id,
-            )
 
         # Reset for the next stream_response() iteration.
         state.raw_text = ""
