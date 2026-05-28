@@ -31,7 +31,6 @@ from open_shrimp.config import ContextConfig
 from open_shrimp.hooks import (
     ApprovalCallback,
     EditNotifyCallback,
-    QuestionCallback,
     make_can_use_tool,
 )
 
@@ -146,7 +145,6 @@ async def run_agent(
     request_approval: ApprovalCallback,
     session_id: str | None = None,
     attachments: list[FileAttachment] | None = None,
-    handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
     notify_auto_approved_edit: EditNotifyCallback | None = None,
 ) -> AsyncIterator[AgentEvent]:
@@ -155,7 +153,6 @@ async def run_agent(
         request_approval=request_approval,
         cwd=context.directory,
         additional_directories=context.additional_directories or None,
-        handle_user_questions=handle_user_questions,
         is_edit_auto_approved=is_edit_auto_approved,
         notify_auto_approved_edit=notify_auto_approved_edit,
     )

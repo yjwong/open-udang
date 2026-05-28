@@ -15,7 +15,6 @@ const COMMON_TOOLS = [
   "Bash(make *)",
   "Bash(cargo *)",
   "Bash(go *)",
-  "AskUserQuestion",
   "LSP",
   "NotebookEdit",
   "WebFetch",

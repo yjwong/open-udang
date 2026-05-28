@@ -24,7 +24,6 @@ contexts:
   myproject:
     allowed_tools:
       - LSP
-      - AskUserQuestion
       - "Bash(git *)"       # all git commands
       - "Bash(npm test)"    # specific command
       - "Bash(make *)"      # all make targets
@@ -94,7 +93,6 @@ contexts:
     description: "Sandboxed project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: docker
 ```
@@ -109,7 +107,3 @@ OpenShrimp blocks certain dangerous operations regardless of approval state:
 - Glob patterns in write operation paths
 
 These are never auto-approved. They always fall through to the interactive Telegram approval prompt, where you can still manually approve them if needed.
-
-## AskUserQuestion handling
-
-When Claude uses the `AskUserQuestion` tool, OpenShrimp intercepts it and presents the question to you in Telegram. Your reply is forwarded back to Claude. This provides a better experience than the CLI's interactive prompt.

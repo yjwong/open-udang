@@ -79,7 +79,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     config: Config = context.bot_data["config"]
     data = query.data
 
-    # AskUserQuestion callbacks (q_opt, q_toggle, q_done, q_other, q_noop)
+    # OpenCode question callbacks (q_opt, q_toggle, q_done, q_other, q_noop)
     if await _handle_question_callback(query, data, config):
         return
 

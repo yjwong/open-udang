@@ -71,7 +71,6 @@ contexts:
     description: "My main project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
 ```
 
 ### Context fields
@@ -99,7 +98,6 @@ Tools listed here are passed to the Claude CLI as `--allowedTools` and are alway
 ```yaml
 allowed_tools:
   - LSP
-  - AskUserQuestion
   - "Bash(git *)"        # allow all git commands
   - "Bash(npm test)"     # allow npm test specifically
 ```
@@ -276,7 +274,6 @@ contexts:
     description: "Default context"
     allowed_tools:
       - LSP
-      - AskUserQuestion
 
   webapp:
     directory: /home/you/Documents/webapp
@@ -284,7 +281,6 @@ contexts:
     model: sonnet
     allowed_tools:
       - LSP
-      - AskUserQuestion
       - "Bash(npm *)"
     additional_directories:
       - /home/you/Documents/shared-components
@@ -298,7 +294,6 @@ contexts:
     description: "Infrastructure (locked to ops group)"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     locked_for_chats:
       - -1001234567890
 

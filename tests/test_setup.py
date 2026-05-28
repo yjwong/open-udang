@@ -45,7 +45,7 @@ class TestRunSetupWizard:
         ctx = raw["contexts"]["myproject"]
         assert ctx["description"] == "My project"
         assert ctx["model"] == "sonnet"
-        assert ctx["allowed_tools"] == ["LSP", "AskUserQuestion"]
+        assert ctx["allowed_tools"] == ["LSP"]
         review = raw["review"]
         assert review["tunnel"] == "cloudflared"
         assert 49152 <= review["port"] <= 65535

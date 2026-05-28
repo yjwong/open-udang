@@ -183,7 +183,7 @@ def _prompt_context() -> tuple[str, dict[str, Any]]:
     context_dict: dict[str, Any] = {
         "directory": resolved_dir,
         "description": description,
-        "allowed_tools": ["LSP", "AskUserQuestion"],
+        "allowed_tools": ["LSP"],
     }
     if model is not None:
         context_dict["model"] = model

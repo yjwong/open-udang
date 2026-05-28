@@ -15,7 +15,6 @@ contexts:
     # effort: medium  # Optional thinking effort level: low, medium, high, xhigh, max. Omit for CLI default.
     allowed_tools:
       - LSP
-      - AskUserQuestion
       # Note: Read, Glob, Grep, Write, and Edit are intentionally NOT listed
       # here. They are handled by OpenShrimp's path-scoped approval:
       #

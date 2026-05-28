@@ -23,7 +23,6 @@ contexts:
     description: "Browser automation"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: docker
       computer_use: true
@@ -43,7 +42,6 @@ contexts:
     description: "Browser automation"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: libvirt
       computer_use: true

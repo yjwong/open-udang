@@ -43,7 +43,6 @@ contexts:
     description: "Team project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     default_for_chats:
       - -1001234567890  # the group chat ID
 ```
@@ -59,7 +58,6 @@ contexts:
     description: "Production codebase"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     locked_for_chats:
       - -1001234567890
 ```

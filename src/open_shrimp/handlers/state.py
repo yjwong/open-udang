@@ -201,13 +201,13 @@ _media_group_tasks: dict[str, asyncio.Task[Any]] = {}
 _MEDIA_GROUP_WAIT: float = 0.5
 
 # ---------------------------------------------------------------------------
-# AskUserQuestion state
+# OpenCode question state
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class _QuestionState:
-    """State for an active AskUserQuestion inline keyboard."""
+    """State for an active OpenCode question inline keyboard."""
 
     question_id: str
     scope: ChatScope

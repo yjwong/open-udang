@@ -18,7 +18,6 @@ contexts:
     description: "React app"
     allowed_tools:
       - LSP
-      - AskUserQuestion
       - "Bash(npm *)"
 
   backend:
@@ -26,7 +25,6 @@ contexts:
     description: "API server"
     allowed_tools:
       - LSP
-      - AskUserQuestion
       - "Bash(go *)"
     model: opus
 
@@ -35,7 +33,6 @@ contexts:
     description: "Documentation site"
     allowed_tools:
       - LSP
-      - AskUserQuestion
 
 default_context: frontend
 ```
@@ -85,7 +82,6 @@ contexts:
     description: "React app"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     additional_directories:
       - /home/you/Documents/shared-lib
       - /home/you/Documents/api-types
@@ -112,7 +108,6 @@ contexts:
     description: "Team project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     default_for_chats:
       - -1001234567890  # group chat ID
 ```
@@ -128,7 +123,6 @@ contexts:
     description: "Production codebase"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     locked_for_chats:
       - -1001234567890
 ```
@@ -146,7 +140,6 @@ contexts:
     description: "Quick scripting tasks"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     model: haiku
 ```
 

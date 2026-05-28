@@ -1,13 +1,8 @@
 """Tool permission callbacks for OpenShrimp.
 
-Implements the canUseTool callback for the Claude Agent SDK. When a tool is
-not in the allowedTools list, the CLI asks for permission via this callback.
-We present a Telegram inline keyboard and await the user's decision.
-
-AskUserQuestion is handled specially: the hook presents questions to the user
-via Telegram, collects answers, then denies the tool (to prevent the CLI from
-trying its own interactive UI) while passing the answers back via the deny
-message so Claude receives them.
+Implements the tool permission policy for OpenCode. When a tool is not covered
+by session permission rules, OpenCode asks for permission via this callback. We
+present a Telegram inline keyboard and await the user's decision.
 
 Path-scoped auto-approval: read-only file-access tools (Read, Glob, Grep)
 are auto-approved when their target paths resolve to within the context's
@@ -53,10 +48,6 @@ ATTACHMENT_TEMP_DIR = Path(tempfile.gettempdir()) / "openshrimp_uploads"
 ApprovalCallback = Callable[
     [str, dict[str, Any], str, str | None], Awaitable[bool]
 ]
-
-# Type for the question callback: receives list of question dicts,
-# returns answers dict mapping question text -> answer string.
-QuestionCallback = Callable[[list[dict[str, Any]]], Awaitable[dict[str, str]]]
 
 # Outcome of a host_bash approval prompt.
 HostBashOutcome = Literal["approved", "denied", "timeout"]
@@ -424,7 +415,6 @@ def make_can_use_tool(
     request_approval: ApprovalCallback,
     cwd: str,
     additional_directories: list[str] | None = None,
-    handle_user_questions: QuestionCallback | None = None,
     is_edit_auto_approved: Callable[[], bool] | None = None,
     notify_auto_approved_edit: EditNotifyCallback | None = None,
     chat_id: int | None = None,
@@ -448,10 +438,7 @@ def make_can_use_tool(
        all approved directories always fall through to the interactive
        approval prompt.
 
-    2. AskUserQuestion: presents questions to the user via Telegram, collects
-       answers, then denies the tool to prevent the CLI's own interactive UI.
-
-    3. Everything else: sends a Telegram inline keyboard for manual approval.
+    2. Everything else: sends a Telegram inline keyboard for manual approval.
 
     Args:
         request_approval: Async callback that presents the tool call to the user
@@ -460,8 +447,6 @@ def make_can_use_tool(
         additional_directories: Optional list of extra directories that are
             also approved for path-scoped auto-approval (mirrors the SDK's
             add_dirs / --add-dir).
-        handle_user_questions: Optional async callback for AskUserQuestion.
-            Receives the questions list, returns answers dict.
         is_edit_auto_approved: Optional callback that returns True if the user
             has opted into "accept all edits" for the current session. When
             set and returning True, mutating tools (Edit, Write) within
@@ -535,30 +520,6 @@ def make_can_use_tool(
         if tool_name == "mcp__openshrimp__port_forward":
             if tool_input.get("action") in ("list", "remove"):
                 return PermissionResultAllow()
-
-        # Special handling for AskUserQuestion: present questions to user
-        # via Telegram, collect answers, then DENY the tool to prevent the
-        # CLI from trying its own interactive UI.  The user's answers are
-        # passed back to Claude via the deny message so it can use them.
-        if tool_name == "AskUserQuestion" and handle_user_questions:
-            questions = tool_input.get("questions", [])
-            logger.info("AskUserQuestion with %d question(s)", len(questions))
-            answers = await handle_user_questions(questions)
-            logger.info("Collected answers for AskUserQuestion: %s", answers)
-
-            # Format answers for Claude to consume
-            answer_lines = []
-            for question_text, answer in answers.items():
-                answer_lines.append(f"Q: {question_text}\nA: {answer}")
-            answers_text = "\n\n".join(answer_lines)
-
-            return PermissionResultDeny(
-                message=(
-                    "The user has already answered these questions via the "
-                    "Telegram interface. Do not retry this tool call. "
-                    "Here are their responses:\n\n" + answers_text
-                ),
-            )
 
         # Recompute approved directories on every call so newly-added
         # session-approved dirs (from "Allow <dir>/ this session" clicks)

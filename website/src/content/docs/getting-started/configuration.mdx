@@ -41,7 +41,6 @@ contexts:
     description: "My main project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
 
 default_context: myproject
 ```
@@ -76,7 +75,6 @@ contexts:
     description: "My main project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
 ```
 
 ### Required fields
@@ -94,7 +92,6 @@ Tools listed in `allowed_tools` are passed to the Claude CLI as `--allowedTools`
 ```yaml
 allowed_tools:
   - LSP
-  - AskUserQuestion
   - "Bash(git *)"     # allow all git commands
   - "Bash(npm test)"  # allow npm test
 ```
@@ -119,7 +116,6 @@ contexts:
     description: "My main project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     model: sonnet                    # model override (sonnet, opus, haiku, or full ID)
     additional_directories:
       - /home/you/Documents/shared-lib

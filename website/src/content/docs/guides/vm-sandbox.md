@@ -23,7 +23,6 @@ contexts:
     description: "My project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: libvirt
 ```

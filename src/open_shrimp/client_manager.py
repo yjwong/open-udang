@@ -44,7 +44,6 @@ from open_shrimp.hooks import (
     ApprovalCallback,
     EditNotifyCallback,
     HostBashApprovalCallback,
-    QuestionCallback,
 )
 from open_shrimp.sandbox import Sandbox, SandboxManager
 from open_shrimp.tools import create_openshrimp_mcp_server
@@ -243,8 +242,7 @@ class CallbackContext:
     """
 
     request_approval: ApprovalCallback | None = None
-    handle_user_questions: QuestionCallback | None = None
-    handle_opencode_questions: (
+    handle_questions: (
         Callable[[list[dict[str, Any]]], Awaitable[list[list[str]]]] | None
     ) = None
     is_edit_auto_approved: Callable[[], bool] | None = None
@@ -324,8 +322,7 @@ async def get_or_create_session(
         if existing.context_name == context_name:
             if _is_client_alive(existing.client):
                 existing.callback_context.request_approval = callback_context.request_approval
-                existing.callback_context.handle_user_questions = callback_context.handle_user_questions
-                existing.callback_context.handle_opencode_questions = callback_context.handle_opencode_questions
+                existing.callback_context.handle_questions = callback_context.handle_questions
                 existing.callback_context.is_edit_auto_approved = callback_context.is_edit_auto_approved
                 existing.callback_context.notify_auto_approved_edit = callback_context.notify_auto_approved_edit
                 existing.callback_context.is_tool_auto_approved = callback_context.is_tool_auto_approved
@@ -360,7 +357,6 @@ async def get_or_create_session(
         request_approval=_make_approval_proxy(callback_context),
         cwd=context.directory,
         additional_directories=context.additional_directories or None,
-        handle_user_questions=_make_questions_proxy(callback_context),
         is_edit_auto_approved=_make_edit_approved_proxy(callback_context),
         notify_auto_approved_edit=_make_edit_notify_proxy(callback_context),
         chat_id=scope.chat_id,
@@ -552,7 +548,7 @@ async def get_or_create_session(
         include_partial_messages=True,
         stderr=_log_stderr,
         can_use_tool=can_use_tool,
-        handle_questions=_make_opencode_questions_proxy(callback_context),
+        handle_questions=_make_questions_proxy(callback_context),
         cli_path=cli_path,
         max_buffer_size=10 * 1024 * 1024,  # 10MB
     )
@@ -1007,28 +1003,14 @@ def _make_approval_proxy(
 
 def _make_questions_proxy(
     ctx: CallbackContext,
-) -> QuestionCallback:
-    async def _proxy(
-        questions: list[dict[str, Any]],
-    ) -> dict[str, str]:
-        if ctx.handle_user_questions is None:
-            logger.warning("No question callback set, returning empty answers")
-            return {}
-        return await ctx.handle_user_questions(questions)
-
-    return _proxy
-
-
-def _make_opencode_questions_proxy(
-    ctx: CallbackContext,
 ) -> Callable[[list[dict[str, Any]]], Awaitable[list[list[str]]]]:
     async def _proxy(
         questions: list[dict[str, Any]],
     ) -> list[list[str]]:
-        if ctx.handle_opencode_questions is None:
-            logger.warning("No OpenCode question callback set, returning empty answers")
+        if ctx.handle_questions is None:
+            logger.warning("No question callback set, returning empty answers")
             return []
-        return await ctx.handle_opencode_questions(questions)
+        return await ctx.handle_questions(questions)
 
     return _proxy
 

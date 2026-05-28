@@ -69,7 +69,7 @@ def test_hooks_literals_covered() -> None:
     Static-analyses hooks.py for ``tool_name == "X"`` and ``tool_name in
     {...}``-style checks against literals, then asserts that every hooks
     literal that names a built-in OpenCode tool has a HOOKS_TO_OPENCODE
-    entry. MCP / `host_bash` / `AskUserQuestion` literals are exempt.
+    entry. MCP / `host_bash` literals are exempt.
     """
     hooks_file = Path(__file__).resolve().parents[2] / (
         "src/open_shrimp/hooks.py"
@@ -112,7 +112,6 @@ def test_hooks_literals_covered() -> None:
 
     # Strings the hooks file uses that aren't OpenCode built-in tools.
     exempt = {
-        "AskUserQuestion",
         "Monitor",  # SDK-specific concept; not an OpenCode built-in tool
         "mcp__openshrimp__port_forward",
     }

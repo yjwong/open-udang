@@ -16,7 +16,6 @@ contexts:
     description: "My project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: docker
 ```
@@ -41,7 +40,6 @@ contexts:
     description: "My project"
     allowed_tools:
       - LSP
-      - AskUserQuestion
     sandbox:
       backend: docker
       dockerfile: /home/you/Documents/myproject/Dockerfile.claude

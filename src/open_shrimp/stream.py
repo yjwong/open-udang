@@ -375,11 +375,6 @@ def extract_tool_summary(
         subagent = tool_input.get("subagent_type", "")
         label = f"({subagent}) " if subagent else ""
         return f"{label}{desc}" if desc else subagent
-    if tool_name == "AskUserQuestion":
-        questions = tool_input.get("questions", [])
-        if questions:
-            return questions[0].get("header", questions[0].get("question", ""))[:60]
-        return "asking user"
     if tool_name == "TodoWrite":
         todos = tool_input.get("todos", [])
         if not todos:

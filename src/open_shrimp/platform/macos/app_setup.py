@@ -180,7 +180,7 @@ def _build_config_dict(
     context: dict[str, Any] = {
         "directory": directory,
         "description": description,
-        "allowed_tools": ["LSP", "AskUserQuestion"],
+        "allowed_tools": ["LSP"],
     }
     if model is not None:
         context["model"] = model

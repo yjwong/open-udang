@@ -1,4 +1,4 @@
-"""AskUserQuestion handling via Telegram inline keyboards."""
+"""Native OpenCode question handling via Telegram inline keyboards."""
 
 from __future__ import annotations
 
@@ -126,29 +126,7 @@ async def _send_question_keyboard(
         _question_states.pop(question_id, None)
 
 
-async def _handle_ask_user_questions(
-    bot: Bot,
-    scope: ChatScope,
-    questions: list[dict[str, Any]],
-    draft_state: _DraftState,
-) -> dict[str, str]:
-    """Present AskUserQuestion questions via Telegram and collect answers.
-
-    Called from the PreToolUse hook when AskUserQuestion is intercepted.
-    Finalizes any in-progress draft before presenting questions.
-    """
-    await finalize_and_reset(bot, draft_state)
-
-    answers: dict[str, str] = {}
-    for q in questions:
-        question_text = q.get("question", "")
-        answer = await _send_question_keyboard(bot, scope, q)
-        answers[question_text] = answer
-
-    return answers
-
-
-async def _handle_opencode_questions(
+async def _handle_questions(
     bot: Bot,
     scope: ChatScope,
     questions: list[dict[str, Any]],
