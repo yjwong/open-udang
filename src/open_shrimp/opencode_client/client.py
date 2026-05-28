@@ -52,6 +52,7 @@ _TOOL_STATUS_ERROR = "error"
 _TOOL_STATUS_IN_FLIGHT = frozenset({_TOOL_STATUS_PENDING, _TOOL_STATUS_RUNNING})
 
 _MUTATING_OPENCODE_PERMS = frozenset({"edit", "write", "apply_patch"})
+_ALWAYS_ALLOWED_OPENCODE_PERMS = frozenset({"todowrite"})
 
 
 _BUS_REGISTRY: dict[int, EventBus] = {}
@@ -192,6 +193,10 @@ class OpenCodeClient:
         for category in OPENCODE_PERMISSION_CATEGORIES:
             rules.append(
                 {"permission": category, "pattern": "*", "action": "ask"}
+            )
+        for permission in sorted(_ALWAYS_ALLOWED_OPENCODE_PERMS):
+            rules.append(
+                {"permission": permission, "pattern": "*", "action": "allow"}
             )
         rules.extend(self._rules_from_allowed_tools())
         rules.extend(self._rules_from_add_dirs())
