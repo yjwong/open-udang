@@ -79,6 +79,20 @@ HOST_BASH_TOOL_NAME = "mcp__openshrimp__host_bash"
 # auto-approved so the user can still see the diff without blocking.
 EditNotifyCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
+
+async def _notify_edit(
+    notify: EditNotifyCallback | None,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> None:
+    """Fire the auto-approved-edit notification, swallowing errors."""
+    if notify is None:
+        return
+    try:
+        await notify(tool_name, tool_input)
+    except Exception:
+        logger.exception("Failed to send auto-approved edit notification")
+
 # Type for the per-tool auto-approval check: receives tool_name and
 # tool_input, returns True if the user has opted into auto-approval for
 # that tool (possibly with a pattern constraint) this session.
@@ -283,6 +297,44 @@ _PATH_SCOPED_TOOLS: dict[str, list[str]] = {
 # target path is within the context working directory.  Read-only tools
 # (Read, Glob, Grep) are still auto-approved within cwd.
 _MUTATING_PATH_TOOLS: set[str] = {"Edit", "Write"}
+
+
+# Tools that get session-scoped "Accept all edits" coverage.  Same
+# vocabulary as ``_MUTATING_PATH_TOOLS`` (Edit/Write are path-scoped via
+# ``filePath``) plus ApplyPatch, which carries its own multi-file
+# envelope and is handled out-of-band.
+ACCEPT_ALL_EDITS_TOOLS: frozenset[str] = frozenset({"Edit", "Write", "ApplyPatch"})
+
+
+_APPLY_PATCH_HEADERS: tuple[tuple[str, str], ...] = (
+    ("add", "Add File: "),
+    ("update", "Update File: "),
+    ("delete", "Delete File: "),
+    ("move", "Move to: "),
+)
+
+
+def parse_apply_patch_files(patch_text: str) -> list[tuple[str, str]]:
+    """Return ``(action, path)`` pairs from an apply_patch envelope.
+
+    Recognises ``*** Add File: <path>``, ``*** Update File: <path>``,
+    ``*** Delete File: <path>``, and ``*** Move to: <path>`` headers
+    (see opencode's apply_patch.txt). Paths are returned verbatim — the
+    caller decides whether to resolve them against a cwd, render them
+    relative, or check them against approved directories.
+    """
+    out: list[tuple[str, str]] = []
+    for line in patch_text.splitlines():
+        if not line.startswith("*** "):
+            continue
+        rest = line[4:]
+        for action, prefix in _APPLY_PATCH_HEADERS:
+            if rest.startswith(prefix):
+                path = rest[len(prefix):].strip()
+                if path:
+                    out.append((action, path))
+                break
+    return out
 
 # Path-scoped tools whose path argument identifies a single file (vs a
 # directory).  For these, the parent directory is the right granularity
@@ -524,13 +576,8 @@ def make_can_use_tool(
         # containerized contexts.  For mutating tools (Edit, Write), still
         # fire the edit notification so the user sees diffs.
         if is_containerized and tool_name in _PATH_SCOPED_TOOLS:
-            if tool_name in _MUTATING_PATH_TOOLS and notify_auto_approved_edit:
-                try:
-                    await notify_auto_approved_edit(tool_name, tool_input)
-                except Exception:
-                    logger.exception(
-                        "Failed to send auto-approved edit notification"
-                    )
+            if tool_name in _MUTATING_PATH_TOOLS:
+                await _notify_edit(notify_auto_approved_edit, tool_name, tool_input)
             logger.info(
                 "Auto-approved %s in containerized context", tool_name
             )
@@ -555,13 +602,8 @@ def make_can_use_tool(
         path_scoped_out_of_scope = False
         if tool_path is not None:
             if _is_path_within_any_directory(tool_path, session_dirs):
-                if tool_name in _MUTATING_PATH_TOOLS and notify_auto_approved_edit:
-                    try:
-                        await notify_auto_approved_edit(tool_name, tool_input)
-                    except Exception:
-                        logger.exception(
-                            "Failed to send auto-approved edit notification"
-                        )
+                if tool_name in _MUTATING_PATH_TOOLS:
+                    await _notify_edit(notify_auto_approved_edit, tool_name, tool_input)
                 logger.info(
                     "Auto-approved %s: path %s is within a session-approved dir",
                     tool_name,
@@ -578,17 +620,7 @@ def make_can_use_tool(
                             tool_name,
                             tool_path,
                         )
-                        # Notify the user with the diff (non-blocking)
-                        if notify_auto_approved_edit:
-                            try:
-                                await notify_auto_approved_edit(
-                                    tool_name, tool_input
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "Failed to send auto-approved edit "
-                                    "notification"
-                                )
+                        await _notify_edit(notify_auto_approved_edit, tool_name, tool_input)
                         return PermissionResultAllow()
                     logger.info(
                         "Mutating tool %s within approved dirs requires "
@@ -639,6 +671,34 @@ def make_can_use_tool(
                 "Auto-approved %s in containerized context", tool_name
             )
             return PermissionResultAllow()
+
+        # ApplyPatch carries its own multi-file envelope, so it bypasses
+        # ``_PATH_SCOPED_TOOLS`` and gets a dedicated branch.  Containerized
+        # contexts allow outright (sandbox boundary).  Otherwise accept-all-
+        # edits allows only when every target path resolves inside
+        # ``static_approved_dirs`` — same boundary Edit/Write get.
+        if tool_name == "ApplyPatch":
+            if is_containerized:
+                logger.info("Auto-approved ApplyPatch in containerized context")
+                await _notify_edit(notify_auto_approved_edit, tool_name, tool_input)
+                return PermissionResultAllow()
+            if is_edit_auto_approved and is_edit_auto_approved():
+                patch_text = str(tool_input.get("patchText", ""))
+                patch_files = parse_apply_patch_files(patch_text)
+                resolved = [
+                    p if os.path.isabs(p) else os.path.join(cwd, p)
+                    for _, p in patch_files
+                ]
+                if resolved and all(
+                    _is_path_within_any_directory(p, static_approved_dirs)
+                    for p in resolved
+                ):
+                    logger.info(
+                        "Auto-approved ApplyPatch (accept-all-edits): "
+                        "%d path(s) within approved dirs", len(resolved),
+                    )
+                    await _notify_edit(notify_auto_approved_edit, tool_name, tool_input)
+                    return PermissionResultAllow()
 
         # Per-tool session-scoped auto-approval (e.g. "Accept all git").
         # Checked for tools that reach the interactive approval stage,

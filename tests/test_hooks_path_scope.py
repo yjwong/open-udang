@@ -28,6 +28,7 @@ from open_shrimp.hooks import (
     _suggested_session_dir,
     make_can_use_tool,
     matches_approval_rule,
+    parse_apply_patch_files,
 )
 
 
@@ -299,3 +300,114 @@ def test_matches_approval_rule_blanket() -> None:
     rule = ApprovalRule(tool_name="WebFetch", pattern=None)
     assert matches_approval_rule(rule, "WebFetch", {"url": "x"}) is True
     assert matches_approval_rule(rule, "WebSearch", {"query": "x"}) is False
+
+
+# ---------------------------------------------------------------------------
+# ApplyPatch (OpenCode): patchText path extraction + auto-approve paths
+# ---------------------------------------------------------------------------
+
+
+class TestParseApplyPatchFiles:
+    def test_extracts_add_update_delete_headers(self) -> None:
+        patch = (
+            "*** Begin Patch\n"
+            "*** Add File: src/new.py\n"
+            "+hello\n"
+            "*** Update File: src/app.py\n"
+            "@@ def f():\n"
+            "-1\n"
+            "+2\n"
+            "*** Delete File: old.txt\n"
+            "*** End Patch\n"
+        )
+        assert parse_apply_patch_files(patch) == [
+            ("add", "src/new.py"),
+            ("update", "src/app.py"),
+            ("delete", "old.txt"),
+        ]
+
+    def test_extracts_move_target(self) -> None:
+        patch = (
+            "*** Update File: src/a.py\n"
+            "*** Move to: src/b.py\n"
+            "@@\n-x\n+y\n"
+        )
+        assert parse_apply_patch_files(patch) == [
+            ("update", "src/a.py"),
+            ("move", "src/b.py"),
+        ]
+
+    def test_absolute_paths_kept_as_is(self) -> None:
+        assert parse_apply_patch_files(
+            "*** Add File: /etc/passwd\n+root::0\n"
+        ) == [("add", "/etc/passwd")]
+
+    def test_empty_envelope_returns_empty_list(self) -> None:
+        assert parse_apply_patch_files("") == []
+        assert parse_apply_patch_files(
+            "*** Begin Patch\n*** End Patch\n"
+        ) == []
+
+
+@pytest.mark.asyncio
+class TestApplyPatchApproval:
+    async def test_in_cwd_with_accept_all_edits_auto_approves(
+        self, tmp_path: Path,
+    ) -> None:
+        notify = AsyncMock()
+        request_approval = AsyncMock(return_value=False)
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: a.py\n@@\n-x\n+y\n"
+            "*** End Patch\n"
+        )
+        can_use = make_can_use_tool(
+            request_approval=request_approval,
+            cwd=str(tmp_path),
+            is_edit_auto_approved=lambda: True,
+            notify_auto_approved_edit=notify,
+        )
+        result = await can_use(
+            "ApplyPatch", {"patchText": patch}, _ctx(),
+        )
+        assert isinstance(result, PermissionResultAllow)
+        request_approval.assert_not_awaited()
+        notify.assert_awaited_once()
+
+    async def test_out_of_scope_path_does_not_auto_approve(
+        self, tmp_path: Path,
+    ) -> None:
+        # Even with accept-all-edits on, an absolute path outside cwd must
+        # still prompt — the directory boundary holds.
+        cwd = tmp_path / "cwd"; cwd.mkdir()
+        outside = tmp_path / "outside"; outside.mkdir()
+        patch = (
+            f"*** Update File: {outside / 'x.py'}\n@@\n-a\n+b\n"
+        )
+        request_approval = AsyncMock(return_value=False)
+        can_use = make_can_use_tool(
+            request_approval=request_approval,
+            cwd=str(cwd),
+            is_edit_auto_approved=lambda: True,
+        )
+        result = await can_use(
+            "ApplyPatch", {"patchText": patch}, _ctx(),
+        )
+        assert isinstance(result, PermissionResultDeny)
+        request_approval.assert_awaited_once()
+
+    async def test_without_accept_all_edits_prompts(
+        self, tmp_path: Path,
+    ) -> None:
+        patch = "*** Update File: a.py\n@@\n-x\n+y\n"
+        request_approval = AsyncMock(return_value=False)
+        can_use = make_can_use_tool(
+            request_approval=request_approval,
+            cwd=str(tmp_path),
+            is_edit_auto_approved=lambda: False,
+        )
+        result = await can_use(
+            "ApplyPatch", {"patchText": patch}, _ctx(),
+        )
+        assert isinstance(result, PermissionResultDeny)
+        request_approval.assert_awaited_once()

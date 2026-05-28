@@ -22,7 +22,13 @@ from open_shrimp.handlers.state import (
     _pending_tool_approvals,
 )
 from open_shrimp.handlers.utils import _escape_mdv2
-from open_shrimp.hooks import _PATH_SCOPED_TOOLS, ApprovalRule, HostBashOutcome
+from open_shrimp.hooks import (
+    ACCEPT_ALL_EDITS_TOOLS,
+    _PATH_SCOPED_TOOLS,
+    ApprovalRule,
+    HostBashOutcome,
+    parse_apply_patch_files,
+)
 from open_shrimp.stream import _relative_path
 from open_shrimp.sudo_audit import log_sudo
 
@@ -193,6 +199,42 @@ def _format_write_approval(
     return f"{header}\n\n```\n{escaped_content}\n```"
 
 
+_APPLY_PATCH_ACTION_ICONS = {"add": "+", "update": "~", "delete": "-", "move": ">"}
+
+
+def _format_apply_patch_approval(
+    tool_input: dict[str, Any], cwd: str | None = None,
+) -> str:
+    """Format an ApplyPatch tool call for the approval prompt."""
+    patch_text = tool_input.get("patchText", "")
+    files = parse_apply_patch_files(patch_text)
+    # Exclude move targets from the file count so a rename reads as one file.
+    file_count = sum(1 for action, _ in files if action != "move")
+
+    parts: list[str] = []
+    if files:
+        summary_lines = [
+            f"{_APPLY_PATCH_ACTION_ICONS.get(action, '?')} {_relative_path(path, cwd)}"
+            for action, path in files
+        ]
+        summary = "\n".join(summary_lines)
+        plural = "" if file_count == 1 else "s"
+        parts.append(
+            f"\U0001fa84 *ApplyPatch* \\({file_count} file{plural}\\)"
+        )
+        parts.append(f"```\n{_escape_mdv2(summary)}\n```")
+    else:
+        parts.append("\U0001fa84 *ApplyPatch*")
+
+    max_body_len = 4096 - 400
+    body = patch_text
+    if len(body) > max_body_len:
+        body = body[:max_body_len] + "\n..."
+    parts.append(f"```diff\n{_escape_mdv2(body)}\n```")
+
+    return "\n\n".join(parts)
+
+
 def _format_agent_approval(tool_input: dict[str, Any], expanded: bool = False) -> str:
     """Format an Agent tool call for the approval prompt.
 
@@ -284,6 +326,8 @@ async def _send_auto_approved_diff(
         text = _format_edit_approval(tool_input, cwd=cwd)
     elif tool_name == "Write":
         text = _format_write_approval(tool_input, cwd=cwd)
+    elif tool_name == "ApplyPatch":
+        text = _format_apply_patch_approval(tool_input, cwd=cwd)
     else:
         text = _format_generic_approval(tool_name, tool_input)
 
@@ -339,6 +383,8 @@ async def _send_approval_keyboard(
         text = _format_monitor_approval(tool_input)
     elif tool_name == "Write":
         text = _format_write_approval(tool_input, cwd=cwd)
+    elif tool_name == "ApplyPatch":
+        text = _format_apply_patch_approval(tool_input, cwd=cwd)
     elif tool_name == "Agent":
         text = _format_agent_approval(tool_input, expanded=False)
     elif tool_name == "ExitPlanMode":
@@ -367,9 +413,7 @@ async def _send_approval_keyboard(
 
     # Row 2: session-scoped auto-approval buttons
     session_row: list[InlineKeyboardButton] = []
-    # Edit and Write get an "Accept all edits" option for session-scoped
-    # auto-approval of mutating file operations within the working directory.
-    if tool_name in ("Edit", "Write"):
+    if tool_name in ACCEPT_ALL_EDITS_TOOLS:
         accept_all_data = f"accept_all_edits:{tool_use_id}"
         session_row.append(InlineKeyboardButton("Accept all edits", callback_data=accept_all_data))
     # Bash: prefix-specific persistent rule only (no blanket "Accept all
@@ -486,7 +530,7 @@ async def _send_approval_keyboard(
     future: asyncio.Future[bool] = loop.create_future()
     _approval_futures[approve_data] = future
     _approval_futures[deny_data] = future
-    if tool_name in ("Edit", "Write"):
+    if tool_name in ACCEPT_ALL_EDITS_TOOLS:
         _approval_futures[f"accept_all_edits:{tool_use_id}"] = future
     if accept_all_tool_data:
         _approval_futures[accept_all_tool_data] = future
@@ -797,7 +841,7 @@ async def _auto_resolve_pending_approvals(
 
         # Check if this pending approval matches the new rule.
         matched = False
-        if is_edit_rule and t_name in ("Edit", "Write"):
+        if is_edit_rule and t_name in ACCEPT_ALL_EDITS_TOOLS:
             matched = True
         elif rule is not None and matches_approval_rule(rule, t_name, t_input):
             matched = True
