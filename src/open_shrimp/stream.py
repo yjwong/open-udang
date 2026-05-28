@@ -166,11 +166,10 @@ class StreamResult:
 
     session_id: str | None = None
     model_usage: dict[str, Any] | None = None
-    #: Per-turn token usage from the last AssistantMessage (API ``usage``
-    #: object).  Contains ``input_tokens``, ``output_tokens``,
-    #: ``cache_creation_input_tokens``, ``cache_read_input_tokens``.
+    #: Per-turn token usage from the last AssistantMessage. OpenCode-native
+    #: shape: ``{input, output, reasoning, cache: {read, write}}``.
     turn_usage: dict[str, Any] | None = None
-    num_turns: int = 0
+    num_steps: int = 0
     duration_ms: int = 0
 
 
@@ -953,7 +952,7 @@ async def stream_response(
                 result.session_id = event.session_id
                 state.session_id = event.session_id
                 result.model_usage = event.model_usage
-                result.num_turns = event.num_turns
+                result.num_steps = event.num_steps
                 result.duration_ms = event.duration_ms
                 if event.errors:
                     logger.warning(

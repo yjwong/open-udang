@@ -40,6 +40,20 @@ ContentBlock = Union[TextBlock, ToolUseBlock, ToolResultBlock]
 
 @dataclass
 class AssistantMessage:
+    """An assistant turn — text and/or tool use blocks.
+
+    ``usage`` carries the OpenCode-native token shape
+    ``{input, output, reasoning, cache: {read, write}}`` and is populated
+    on the *final* AssistantMessage of each step (i.e. when
+    ``session.next.step.ended`` fires). Mid-step messages (e.g. those
+    bearing a single ToolUseBlock) leave it ``None``.
+
+    ``error`` is a human-readable string set when
+    ``session.next.step.failed`` fires for the step that produced this
+    message. ``stream.py`` picks it up to render a friendly model-error
+    UI.
+    """
+
     content: list[ContentBlock]
     usage: dict[str, Any] | None = None
     error: str | None = None
@@ -58,13 +72,30 @@ class SystemMessage:
 
 @dataclass
 class ResultMessage:
+    """End-of-turn result emitted once per ``prompt_async`` cycle.
+
+    Fields use OpenCode-native shapes throughout:
+
+    * ``usage`` — aggregate ``{input, output, reasoning, cache: {read,
+      write}}`` summed across every step in this turn.
+    * ``model_usage`` — per-model breakdown keyed by model id, value is
+      ``{input, output, reasoning, cache: {read, write}, cost}``.
+    * ``num_steps`` — count of ``session.next.step.started`` events seen
+      during this turn (one per LLM call; a tool-using turn fires
+      multiple).
+    * ``errors`` — list of ``{message, when}`` dicts, one per
+      ``step.failed``. Empty list on success.
+    * ``total_cost_usd`` — sum of per-step costs from
+      ``step.ended.data.cost``.
+    """
+
     session_id: str
     total_cost_usd: float | None = None
     usage: dict[str, Any] | None = None
-    model_usage: dict[str, Any] | None = None
-    num_turns: int | None = None
+    model_usage: dict[str, dict[str, Any]] | None = None
+    num_steps: int | None = None
     duration_ms: int | None = None
-    errors: list[Any] | None = None
+    errors: list[dict[str, Any]] | None = None
     is_error: bool = False
 
 

@@ -215,6 +215,95 @@ def session_error(message: str) -> dict[str, Any]:
     }
 
 
+def step_started(message_id: str, model_id: str) -> dict[str, Any]:
+    """Emit a ``message.updated`` for an assistant message that's just begun.
+
+    Mirrors the real OpenCode 1.15.11 wire: an in-flight assistant
+    message has zero tokens and no ``finish`` field. Once a matching
+    ``step_ended`` (or ``step_failed``) arrives with the same
+    ``message_id``, the wrapper folds the step in.
+    """
+    return {
+        "type": "message.updated",
+        "properties": {
+            "info": {
+                "id": message_id,
+                "role": "assistant",
+                "modelID": model_id,
+                "providerID": "anthropic",
+                "cost": 0,
+                "tokens": {
+                    "input": 0, "output": 0, "reasoning": 0,
+                    "cache": {"read": 0, "write": 0},
+                },
+            },
+        },
+    }
+
+
+def step_ended(
+    message_id: str,
+    model_id: str,
+    *,
+    input: int = 0,
+    output: int = 0,
+    reasoning: int = 0,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    cost: float = 0.0,
+    finish: str = "stop",
+) -> dict[str, Any]:
+    """Emit the ``message.updated`` event that finalises an assistant step."""
+    return {
+        "type": "message.updated",
+        "properties": {
+            "info": {
+                "id": message_id,
+                "role": "assistant",
+                "modelID": model_id,
+                "providerID": "anthropic",
+                "cost": cost,
+                "tokens": {
+                    "input": input,
+                    "output": output,
+                    "reasoning": reasoning,
+                    "cache": {"read": cache_read, "write": cache_write},
+                },
+                "finish": finish,
+                "time": {"completed": 12345},
+            },
+        },
+    }
+
+
+def step_failed(
+    message_id: str,
+    model_id: str,
+    error: str,
+    *,
+    completed: int = 999,
+) -> dict[str, Any]:
+    """Emit the ``message.updated`` event that finalises a failed step."""
+    return {
+        "type": "message.updated",
+        "properties": {
+            "info": {
+                "id": message_id,
+                "role": "assistant",
+                "modelID": model_id,
+                "providerID": "anthropic",
+                "cost": 0,
+                "tokens": {
+                    "input": 0, "output": 0, "reasoning": 0,
+                    "cache": {"read": 0, "write": 0},
+                },
+                "error": {"type": "unknown", "message": error},
+                "time": {"completed": completed},
+            },
+        },
+    }
+
+
 def tool_part_event(
     call_id: str,
     tool: str,

@@ -43,15 +43,42 @@ async def test_hello_world(tmp_path) -> None:
     async with OpenCodeClient(opts) as client:
         await client.query("Say hello in exactly five words.")
         text_chunks: list[str] = []
-        saw_result = False
+        assistant_usages: list[dict] = []
+        final_result: ResultMessage | None = None
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         text_chunks.append(block.text)
+                if msg.usage is not None:
+                    assistant_usages.append(msg.usage)
             elif isinstance(msg, ResultMessage):
-                saw_result = True
+                final_result = msg
 
     full = "".join(text_chunks).strip()
     assert full, "expected non-empty assistant text"
-    assert saw_result, "expected a final ResultMessage"
+    assert final_result is not None, "expected a final ResultMessage"
+
+    # Phase 2.1: metadata fields populated from real wire data.
+    assert final_result.num_steps >= 1, (
+        f"expected at least one step, got num_steps={final_result.num_steps}"
+    )
+    assert final_result.model_usage, (
+        f"expected non-empty model_usage, got {final_result.model_usage!r}"
+    )
+    assert any(model in key for key in final_result.model_usage), (
+        f"expected model_usage keyed by {model!r}, got keys "
+        f"{list(final_result.model_usage)!r}"
+    )
+    # OpenCode reports ``cost`` verbatim from the provider; some
+    # accounts (OAuth/included tiers) get $0. Only assert presence.
+    assert final_result.total_cost_usd is not None, (
+        "expected total_cost_usd to be populated (even if 0.0)"
+    )
+    assert final_result.errors == [], (
+        f"expected no errors on happy path, got {final_result.errors!r}"
+    )
+    assert assistant_usages, "expected at least one AssistantMessage.usage"
+    assert any(u.get("input", 0) > 0 for u in assistant_usages), (
+        f"expected non-zero input tokens, got {assistant_usages!r}"
+    )

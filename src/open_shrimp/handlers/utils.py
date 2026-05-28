@@ -238,19 +238,24 @@ def _build_status_text(
         lines.append(f"\U0001f9e0 *Effort:* `{_escape_mdv2(ctx.effort)}`")
 
     # Context window usage from per-turn API usage (the last assistant
-    # message).  input_tokens + cache tokens = current context size.
+    # message). OpenCode-native shape — see
+    # ``opencode_client/events.py`` for the schema.
     if turn_usage:
         context_window = _DEFAULT_CONTEXT_LIMIT
         if model_usage:
             first_model = next(iter(model_usage.values()))
-            context_window = first_model.get("contextWindow", _DEFAULT_CONTEXT_LIMIT)
+            # TODO(phase-5): per-model contextWindow lookup. OpenCode's
+            # step.started doesn't carry a context window; for now fall
+            # back to _DEFAULT_CONTEXT_LIMIT.
+            context_window = first_model.get(
+                "contextWindow", _DEFAULT_CONTEXT_LIMIT,
+            )
 
-        # Per-turn usage from the API: input_tokens is non-cached
-        # input, plus the two cache buckets = total context size.
+        cache = turn_usage.get("cache") or {}
         total_tokens = (
-            turn_usage.get("input_tokens", 0)
-            + turn_usage.get("cache_creation_input_tokens", 0)
-            + turn_usage.get("cache_read_input_tokens", 0)
+            turn_usage.get("input", 0)
+            + cache.get("write", 0)
+            + cache.get("read", 0)
         )
 
         total_str = _escape_mdv2(_format_token_count(total_tokens))
@@ -262,7 +267,7 @@ def _build_status_text(
         lines.append(f"\U0001f4ca *Context:* {total_str} / {limit_str} \\({pct_str}\\)")
 
     if model_usage:
-        total_cost = sum(m.get("costUSD", 0) for m in model_usage.values())
+        total_cost = sum(m.get("cost", 0) for m in model_usage.values())
         if total_cost > 0:
             cost_str = _escape_mdv2(f"${total_cost:.4f}")
             lines.append(f"\U0001f4b0 *Cost:* {cost_str}")

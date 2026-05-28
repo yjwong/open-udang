@@ -853,7 +853,7 @@ async def _start_agent_task(
                             todos=latest_todos if latest_todos else None,
                         )
 
-                    if result.num_turns == 0 and result.session_id is None:
+                    if result.num_steps == 0 and result.session_id is None:
                         break
 
                     # Reset retry counter on successful iteration.

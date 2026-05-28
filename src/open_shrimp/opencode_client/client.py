@@ -38,10 +38,12 @@ logger = logging.getLogger(__name__)
 
 EVT_MESSAGE_PART_DELTA = "message.part.delta"
 EVT_MESSAGE_PART_UPDATED = "message.part.updated"
+EVT_MESSAGE_UPDATED = "message.updated"
 EVT_PERMISSION_ASKED = "permission.asked"
 EVT_SESSION_IDLE = "session.idle"
 EVT_SESSION_ERROR = "session.error"
-EVT_SESSION_NEXT_STEP_FAILED = "session.next.step.failed"
+
+_TOKEN_KEYS = ("input", "output", "reasoning")
 
 _TOOL_STATUS_PENDING = "pending"
 _TOOL_STATUS_RUNNING = "running"
@@ -422,6 +424,18 @@ async def _iter_response(
     tool_result_emitted: set[str] = set()
     loop = asyncio.get_running_loop()
     deadline = loop.time() + query_timeout
+    turn_start_ms = int(loop.time() * 1000)
+
+    # Per-turn usage accumulation. OpenCode emits a stream of
+    # ``message.updated`` events per assistant message; we treat each
+    # unique assistant ``info.id`` as one "step" and finalise the
+    # step's tokens/cost/error exactly once (on first sight of
+    # ``finish`` or ``error`` in the info payload).
+    model_usage: dict[str, dict[str, Any]] = {}
+    total_cost_usd = 0.0
+    errors: list[dict[str, Any]] = []
+    seen_step_ids: set[str] = set()      # any assistant id we've seen at all
+    finalised_steps: set[str] = set()    # ids whose tokens/error we've folded
 
     def _flush_text() -> list[AssistantMessage]:
         out: list[AssistantMessage] = []
@@ -433,6 +447,26 @@ async def _iter_response(
                 )
         text_buffers.clear()
         part_order.clear()
+        return out
+
+    def _flush_step(
+        usage: dict[str, Any] | None,
+        error: str | None,
+    ) -> list[AssistantMessage]:
+        """Flush buffered text and attach the step's usage/error.
+
+        Usage/error rides on the *final* AssistantMessage of the step.
+        When the step produced no text we still emit an empty
+        AssistantMessage so per-turn UI in ``stream.py`` (which reads
+        ``event.usage``) sees the update.
+        """
+        out = _flush_text()
+        if usage is None and error is None:
+            return out
+        if not out:
+            out.append(AssistantMessage(content=[]))
+        out[-1].usage = usage
+        out[-1].error = error
         return out
 
     while True:
@@ -451,18 +485,72 @@ async def _iter_response(
         if not isinstance(props, dict):
             props = {}
 
+
         if etype == EVT_SESSION_ERROR:
             raise ProcessError(_extract_error_message(props))
 
-        if etype == EVT_SESSION_NEXT_STEP_FAILED:
-            raise ProcessError(
-                f"{EVT_SESSION_NEXT_STEP_FAILED}: {props.get('error')!r}"
-            )
+        if etype == EVT_MESSAGE_UPDATED:
+            info = props.get("info")
+            if not isinstance(info, dict) or info.get("role") != "assistant":
+                continue
+            step_id = info.get("id")
+            if not isinstance(step_id, str):
+                continue
+            seen_step_ids.add(step_id)
+            if step_id in finalised_steps:
+                continue
+
+            err = info.get("error")
+            err_message: str | None = None
+            if isinstance(err, dict):
+                raw = err.get("message")
+                if isinstance(raw, str) and raw:
+                    err_message = raw
+
+            finish = info.get("finish")
+            if err_message is None and not isinstance(finish, str):
+                # Step is still in flight — wait for finish/error.
+                continue
+
+            finalised_steps.add(step_id)
+            model_id = info.get("modelID")
+            tokens = info.get("tokens")
+            tokens = tokens if isinstance(tokens, dict) else None
+            cost = info.get("cost")
+            cost = float(cost) if isinstance(cost, (int, float)) else 0.0
+            if err_message is None:
+                total_cost_usd += cost
+                _fold_into_model_usage(
+                    model_usage,
+                    model_id if isinstance(model_id, str) else None,
+                    tokens, cost,
+                )
+                for msg in _flush_step(usage=tokens, error=None):
+                    yield msg
+            else:
+                errors.append(
+                    {
+                        "message": err_message,
+                        "when": (info.get("time") or {}).get("completed"),
+                    }
+                )
+                for msg in _flush_step(usage=None, error=err_message):
+                    yield msg
+            continue
 
         if etype == EVT_SESSION_IDLE:
             for msg in _flush_text():
                 yield msg
-            yield ResultMessage(session_id=session_id, is_error=False)
+            yield ResultMessage(
+                session_id=session_id,
+                total_cost_usd=total_cost_usd,
+                usage=_aggregate_tokens(model_usage),
+                model_usage=model_usage,
+                num_steps=len(seen_step_ids),
+                duration_ms=int(loop.time() * 1000) - turn_start_ms,
+                errors=errors,
+                is_error=bool(errors),
+            )
             return
 
         if etype == EVT_MESSAGE_PART_DELTA and props.get("field") == "text":
@@ -497,6 +585,64 @@ async def _iter_response(
             continue
 
         logger.debug("dropping event type=%s", etype)
+
+
+def _new_token_bucket() -> dict[str, Any]:
+    return {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {"read": 0, "write": 0},
+    }
+
+
+def _add_tokens(dest: dict[str, Any], src: dict[str, Any]) -> None:
+    """Add ``src``'s token fields into ``dest`` in place.
+
+    Both dicts use the OpenCode-native shape produced by
+    ``_new_token_bucket``. ``src`` may also be raw wire ``tokens`` —
+    untrusted, so each scalar is type-guarded.
+    """
+    for key in _TOKEN_KEYS:
+        val = src.get(key)
+        if isinstance(val, (int, float)):
+            dest[key] += int(val)
+    cache = src.get("cache")
+    if isinstance(cache, dict):
+        dest_cache = dest["cache"]
+        for sub in ("read", "write"):
+            val = cache.get(sub)
+            if isinstance(val, (int, float)):
+                dest_cache[sub] += int(val)
+
+
+def _fold_into_model_usage(
+    model_usage: dict[str, dict[str, Any]],
+    model_id: str | None,
+    tokens: dict[str, Any] | None,
+    cost: float,
+) -> None:
+    """Accumulate one step's tokens/cost into the per-model bucket."""
+    if model_id is None:
+        return
+    bucket = model_usage.get(model_id)
+    if bucket is None:
+        bucket = _new_token_bucket()
+        bucket["cost"] = 0.0
+        model_usage[model_id] = bucket
+    if tokens is not None:
+        _add_tokens(bucket, tokens)
+    bucket["cost"] += cost
+
+
+def _aggregate_tokens(
+    model_usage: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Sum per-model token buckets into a single OpenCode-native dict."""
+    total = _new_token_bucket()
+    for bucket in model_usage.values():
+        _add_tokens(total, bucket)
+    return total
 
 
 def _toolpart_messages(
