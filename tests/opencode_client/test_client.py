@@ -87,24 +87,6 @@ async def test_session_error_raises_process_error(
     assert "model exploded" in str(exc.value)
 
 
-async def test_query_timeout(
-    mock_server: MockOpenCode, wired_server
-) -> None:
-    """If no session.idle ever arrives, receive_response raises ProcessError."""
-    opts = OpenCodeOptions(
-        cwd="/tmp", provider="openai", model="gpt-test", query_timeout=0.3
-    )
-    async with OpenCodeClient(opts) as client:
-        sid = client.session_id
-        assert sid is not None
-        # Empty script -> nothing ever sent.
-        mock_server.script(sid, [])
-        await client.query("hi")
-        with pytest.raises(ProcessError):
-            async for _ in client.receive_response():
-                pass
-
-
 async def test_resume_passes_through(
     mock_server: MockOpenCode, wired_server
 ) -> None:

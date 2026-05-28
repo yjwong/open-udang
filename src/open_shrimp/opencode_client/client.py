@@ -365,7 +365,6 @@ class OpenCodeClient:
         async for msg in _iter_response(
             self._events,
             self._session_id,
-            self._options.query_timeout,
             self._bridge,
         ):
             yield msg
@@ -438,10 +437,9 @@ def _resolve_part_id(props: dict[str, Any]) -> str | None:
 async def _iter_response(
     queue: EventQueue,
     session_id: str,
-    query_timeout: float,
     bridge: PermissionBridge | None,
 ) -> AsyncIterator[Message]:
-    """Translate SSE events into wrapper messages until session.idle or timeout."""
+    """Translate SSE events into wrapper messages until session.idle."""
     text_buffers: dict[str, list[str]] = {}
     part_order: list[str] = []
     tool_use_emitted: set[str] = set()
@@ -453,7 +451,6 @@ async def _iter_response(
     # drop matching deltas to keep thinking traces out of Telegram.
     reasoning_part_ids: set[str] = set()
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + query_timeout
     turn_start_ms = int(loop.time() * 1000)
 
     # Per-turn usage accumulation. OpenCode emits a stream of
@@ -500,13 +497,8 @@ async def _iter_response(
         return out
 
     while True:
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            raise ProcessError("opencode serve query exceeded query_timeout")
         try:
-            evt = await asyncio.wait_for(queue.get(), timeout=remaining)
-        except asyncio.TimeoutError:
-            raise ProcessError("opencode serve query exceeded query_timeout")
+            evt = await queue.get()
         except asyncio.CancelledError:
             raise ProcessError("opencode serve dropped the session")
 

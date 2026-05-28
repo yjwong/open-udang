@@ -38,7 +38,6 @@ async def test_hello_world(tmp_path) -> None:
         cwd=str(tmp_path),
         provider=provider,
         model=model,
-        query_timeout=120.0,
     )
     async with OpenCodeClient(opts) as client:
         await client.query("Say hello in exactly five words.")

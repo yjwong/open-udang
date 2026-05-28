@@ -31,7 +31,6 @@ class OpenCodeOptions:
     provider: str
     model: str
     resume: str | None = None
-    query_timeout: float = 300.0
 
     # Honoured fields.
     effort: str | None = None  # → variant on prompt_async
