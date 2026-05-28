@@ -570,12 +570,15 @@ async def _send_approval_keyboard(
                     f"Allow & remember: {prefix} *",
                     callback_data=accept_prefix_data,
                 ))
-    # Path-scoped tools are excluded from the generic "Accept all <tool>"
-    # button: an in-scope path auto-approves already, and an out-of-scope
-    # path must go through the directory-scoped button below — blanket
-    # per-tool rules must not bypass the directory boundary.  Bash and
-    # ExitPlanMode have their own dedicated approval flows.
-    _no_accept_all = _PATH_SCOPED_TOOLS.keys() | {"ExitPlanMode", "Bash", "Monitor"}
+    # Path-scoped tools and edit-wide tools are excluded from the generic
+    # "Accept all <tool>" button.  Edit-wide tools use the narrower
+    # "Accept all edits" flow, which preserves path-boundary checks for
+    # ApplyPatch as well as Edit/Write.
+    _no_accept_all = (
+        set(_PATH_SCOPED_TOOLS)
+        | ACCEPT_ALL_EDITS_TOOLS
+        | {"ExitPlanMode", "Bash", "Monitor"}
+    )
     accept_all_tool_key = ""
     accept_all_tool_data = ""
     if tool_name not in _no_accept_all:
