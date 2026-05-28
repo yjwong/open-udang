@@ -8,6 +8,7 @@ import pytest
 
 from open_shrimp.handlers.approval import _send_approval_keyboard
 from open_shrimp.handlers.state import _approval_futures
+from open_shrimp.stream import _SUPPRESS_NOTIFICATION_TOOLS
 
 
 class _FakeBot:
@@ -65,3 +66,7 @@ async def test_apply_patch_keyboard_omits_generic_accept_all(tmp_path) -> None:
         for key in list(_approval_futures):
             if tool_use_id in key:
                 _approval_futures.pop(key, None)
+
+
+def test_apply_patch_stream_notification_is_suppressed() -> None:
+    assert "ApplyPatch" in _SUPPRESS_NOTIFICATION_TOOLS

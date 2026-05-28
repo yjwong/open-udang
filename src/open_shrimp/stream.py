@@ -55,8 +55,8 @@ BASH_OUTPUT_MAX_LINES = 50
 # Maximum characters of Bash output to display.
 BASH_OUTPUT_MAX_CHARS = 1500
 # Tools whose blockquote notifications are suppressed because their output
-# is shown directly (Bash output as code block, Write via edit notification).
-_SUPPRESS_NOTIFICATION_TOOLS: set[str] = {"Bash", "Edit", "Write"}
+# is shown directly or represented by approval/edit notifications.
+_SUPPRESS_NOTIFICATION_TOOLS: set[str] = {"Bash", "Edit", "Write", "ApplyPatch"}
 
 # Stored Bash outputs for on-demand reveal via inline keyboard button.
 # Keyed by a unique callback ID, value is the formatted GFM output string.
