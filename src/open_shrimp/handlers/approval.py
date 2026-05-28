@@ -27,7 +27,6 @@ from open_shrimp.hooks import (
     _PATH_SCOPED_TOOLS,
     ApprovalRule,
     HostBashOutcome,
-    parse_apply_patch_files,
 )
 from open_shrimp.stream import _relative_path
 from open_shrimp.sudo_audit import log_sudo
@@ -202,35 +201,178 @@ def _format_write_approval(
 _APPLY_PATCH_ACTION_ICONS = {"add": "+", "update": "~", "delete": "-", "move": ">"}
 
 
+# One file's worth of the apply_patch envelope, normalised into something
+# we can render as a unified diff.  ``new_path`` only differs from ``path``
+# for ``move`` (rename) operations.  ``body_lines`` are the raw hunk lines
+# from the envelope (already prefixed with ``@@``/`` ``/``-``/``+``) for
+# update/move; the ``+``-prefixed content lines for add; and empty for
+# delete and move-only.
+class _ApplyPatchFile:
+    __slots__ = ("action", "path", "new_path", "body_lines")
+
+    def __init__(
+        self,
+        action: str,
+        path: str,
+        new_path: str | None,
+        body_lines: list[str],
+    ) -> None:
+        self.action = action
+        self.path = path
+        self.new_path = new_path
+        self.body_lines = body_lines
+
+
+# Markers we strip when extracting per-file hunk bodies.  Everything else
+# in the envelope (``@@``, `` ``, ``-``, ``+``) is unified-diff syntax
+# already and passes through verbatim.
+_ENVELOPE_MARKERS = ("*** Begin Patch", "*** End Patch", "*** End of File")
+
+
+def _parse_apply_patch_envelope(patch_text: str) -> list[_ApplyPatchFile]:
+    """Split an apply_patch envelope into per-file records.
+
+    Mirrors the structure of opencode's ``parsePatch`` (see
+    ``packages/opencode/src/patch/index.ts``) but only as much as the
+    approval renderer needs: the action, the path(s), and the raw hunk
+    lines, ready to be wrapped in unified-diff headers.
+    """
+    files: list[_ApplyPatchFile] = []
+    current: _ApplyPatchFile | None = None
+
+    for raw_line in patch_text.splitlines():
+        line = raw_line
+        if line in _ENVELOPE_MARKERS:
+            continue
+
+        if line.startswith("*** Add File: "):
+            current = _ApplyPatchFile("add", line[len("*** Add File: "):].strip(), None, [])
+            files.append(current)
+            continue
+        if line.startswith("*** Update File: "):
+            current = _ApplyPatchFile("update", line[len("*** Update File: "):].strip(), None, [])
+            files.append(current)
+            continue
+        if line.startswith("*** Delete File: "):
+            current = _ApplyPatchFile("delete", line[len("*** Delete File: "):].strip(), None, [])
+            files.append(current)
+            continue
+        if line.startswith("*** Move to: ") and current is not None:
+            current.new_path = line[len("*** Move to: "):].strip()
+            continue
+
+        if current is not None and line and not line.startswith("*** "):
+            current.body_lines.append(line)
+
+    # A bare "Update File + Move to" with no hunk body is a pure rename;
+    # promote it to ``move`` so the summary and renderer treat it as one.
+    for f in files:
+        if f.action == "update" and f.new_path and not f.body_lines:
+            f.action = "move"
+
+    return files
+
+
+def _render_apply_patch_file(file: _ApplyPatchFile, cwd: str | None) -> str:
+    """Render one envelope file as a unified-diff fragment.
+
+    The opencode envelope's hunk lines (`` ``/``-``/``+`` and ``@@
+    <context>``) are already unified-diff syntax — we just prepend
+    ``--- a/<path>`` / ``+++ b/<path>`` headers (with ``/dev/null`` for
+    add/delete) so the user sees something they can read at a glance
+    instead of the wire format.
+    """
+    rel = _relative_path(file.path, cwd)
+
+    if file.action == "add":
+        header = f"--- /dev/null\n+++ b/{rel}"
+        body = "\n".join(file.body_lines)
+        return f"{header}\n{body}" if body else header
+    if file.action == "delete":
+        return f"--- a/{rel}\n+++ /dev/null"
+    if file.action == "move":
+        new_rel = _relative_path(file.new_path or file.path, cwd)
+        return f"rename from {rel}\nrename to {new_rel}"
+
+    # update (with optional rename + content edits)
+    target_rel = _relative_path(file.new_path, cwd) if file.new_path else rel
+    header = f"--- a/{rel}\n+++ b/{target_rel}"
+    body = "\n".join(file.body_lines)
+    return f"{header}\n{body}" if body else header
+
+
 def _format_apply_patch_approval(
     tool_input: dict[str, Any], cwd: str | None = None,
 ) -> str:
     """Format an ApplyPatch tool call for the approval prompt."""
     patch_text = tool_input.get("patchText", "")
-    files = parse_apply_patch_files(patch_text)
-    # Exclude move targets from the file count so a rename reads as one file.
-    file_count = sum(1 for action, _ in files if action != "move")
+    files = _parse_apply_patch_envelope(patch_text)
+    file_count = len(files)
 
     parts: list[str] = []
-    if files:
-        summary_lines = [
-            f"{_APPLY_PATCH_ACTION_ICONS.get(action, '?')} {_relative_path(path, cwd)}"
-            for action, path in files
-        ]
-        summary = "\n".join(summary_lines)
-        plural = "" if file_count == 1 else "s"
-        parts.append(
-            f"\U0001fa84 *ApplyPatch* \\({file_count} file{plural}\\)"
-        )
-        parts.append(f"```\n{_escape_mdv2(summary)}\n```")
-    else:
-        parts.append("\U0001fa84 *ApplyPatch*")
 
+    if file_count == 0:
+        parts.append("\U0001fa84 *ApplyPatch*")
+        # Fall back to showing the raw envelope so the user still sees
+        # *something* if our parser disagrees with opencode about the
+        # format.
+        max_body_len = 4096 - 400
+        body = patch_text
+        if len(body) > max_body_len:
+            body = body[:max_body_len] + "\n..."
+        parts.append(f"```diff\n{_escape_mdv2(body)}\n```")
+        return "\n\n".join(parts)
+
+    plural = "" if file_count == 1 else "s"
+    parts.append(f"\U0001fa84 *ApplyPatch* \\({file_count} file{plural}\\)")
+
+    # Skip the summary block for single-file patches — the diff's own
+    # ``+++ b/<path>`` header carries the same info.
+    if file_count > 1:
+        summary_lines: list[str] = []
+        for f in files:
+            icon = _APPLY_PATCH_ACTION_ICONS.get(f.action, "?")
+            if f.action == "move":
+                summary_lines.append(
+                    f"{icon} {_relative_path(f.path, cwd)} → "
+                    f"{_relative_path(f.new_path or f.path, cwd)}"
+                )
+            elif f.action == "update" and f.new_path:
+                summary_lines.append(
+                    f"{icon} {_relative_path(f.path, cwd)} → "
+                    f"{_relative_path(f.new_path, cwd)}"
+                )
+            else:
+                summary_lines.append(f"{icon} {_relative_path(f.path, cwd)}")
+        parts.append(f"```\n{_escape_mdv2(chr(10).join(summary_lines))}\n```")
+
+    # Truncate at file boundaries: keep emitting per-file diff blocks
+    # until the next one would push us over budget, then summarise the
+    # rest.  Each file is its own ```diff``` block so a long patch reads
+    # as a sequence of diffs instead of a wall.  If the very first file's
+    # hunk is itself too large, render it truncated rather than dropping
+    # everything — the user always sees at least one diff.
     max_body_len = 4096 - 400
-    body = patch_text
-    if len(body) > max_body_len:
-        body = body[:max_body_len] + "\n..."
-    parts.append(f"```diff\n{_escape_mdv2(body)}\n```")
+    rendered = 0
+    omitted = 0
+    for f in files:
+        fragment = _render_apply_patch_file(f, cwd)
+        block = f"```diff\n{_escape_mdv2(fragment)}\n```"
+        used = sum(len(p) for p in parts) + 2 * len(parts)
+        if used + len(block) > max_body_len:
+            if rendered == 0:
+                budget = max(0, max_body_len - used - len("```diff\n\n```\n..."))
+                truncated = _escape_mdv2(fragment)[:budget] + "\n..."
+                parts.append(f"```diff\n{truncated}\n```")
+                rendered += 1
+            omitted = file_count - rendered
+            break
+        parts.append(block)
+        rendered += 1
+
+    if omitted > 0:
+        more_plural = "" if omitted == 1 else "s"
+        parts.append(f"_\\.\\.\\. {omitted} more file{more_plural} omitted_")
 
     return "\n\n".join(parts)
 
