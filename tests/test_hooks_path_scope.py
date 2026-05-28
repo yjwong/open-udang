@@ -292,6 +292,59 @@ class TestSessionApprovedDirs:
 
 
 # ---------------------------------------------------------------------------
+# Read-only git Bash auto-approval
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestReadOnlyGitBashApproval:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git status",
+            "git status --short --branch",
+            "git diff --cached --stat",
+            "git diff -S needle -- src/app.py",
+            "git log --oneline -n 5",
+        ],
+    )
+    async def test_safe_read_only_git_commands_auto_approve(
+        self, tmp_path: Path, command: str,
+    ) -> None:
+        request_approval = AsyncMock(return_value=False)
+        can_use = make_can_use_tool(
+            request_approval=request_approval,
+            cwd=str(tmp_path),
+        )
+        result = await can_use("Bash", {"command": command}, _ctx())
+        assert isinstance(result, PermissionResultAllow)
+        request_approval.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git diff --output=/tmp/pwned",
+            "git status > /tmp/status.txt",
+            "GIT_CONFIG=/tmp/config git status",
+            "git -C /tmp status",
+            "git push",
+            "git status && rm -rf /tmp/x",
+        ],
+    )
+    async def test_unsafe_or_unknown_git_commands_prompt(
+        self, tmp_path: Path, command: str,
+    ) -> None:
+        request_approval = AsyncMock(return_value=False)
+        can_use = make_can_use_tool(
+            request_approval=request_approval,
+            cwd=str(tmp_path),
+        )
+        result = await can_use("Bash", {"command": command}, _ctx())
+        assert isinstance(result, PermissionResultDeny)
+        request_approval.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
 # Existing behavior preserved: matches_approval_rule sanity
 # ---------------------------------------------------------------------------
 

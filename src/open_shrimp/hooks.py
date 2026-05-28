@@ -116,6 +116,160 @@ _ACCEPT_EDITS_BASH_COMMANDS: set[str] = {
     "mkdir", "touch", "rm", "rmdir", "mv", "cp", "sed", "chmod",
 }
 
+# A conservative subset of Claude Code's GIT_READ_ONLY_COMMANDS.  These are
+# auto-approved only when parsed as simple git invocations and every flag is in
+# the per-command allowlist below.  Unknown flags fall through to the normal
+# approval prompt, so write-capable options such as `git diff --output=...` are
+# not silently approved.
+_GIT_READ_ONLY_COMMANDS: dict[str, dict[str, str]] = {
+    "diff": {
+        "--stat": "none",
+        "--numstat": "none",
+        "--shortstat": "none",
+        "--name-only": "none",
+        "--name-status": "none",
+        "--color": "none",
+        "--no-color": "none",
+        "--dirstat": "none",
+        "--summary": "none",
+        "--patch-with-stat": "none",
+        "--word-diff": "none",
+        "--word-diff-regex": "string",
+        "--color-words": "none",
+        "--no-renames": "none",
+        "--no-ext-diff": "none",
+        "--check": "none",
+        "--ws-error-highlight": "string",
+        "--full-index": "none",
+        "--binary": "none",
+        "--abbrev": "number",
+        "--break-rewrites": "none",
+        "--find-renames": "none",
+        "--find-copies": "none",
+        "--find-copies-harder": "none",
+        "--irreversible-delete": "none",
+        "--diff-algorithm": "string",
+        "--histogram": "none",
+        "--patience": "none",
+        "--minimal": "none",
+        "--ignore-space-at-eol": "none",
+        "--ignore-space-change": "none",
+        "--ignore-all-space": "none",
+        "--ignore-blank-lines": "none",
+        "--inter-hunk-context": "number",
+        "--function-context": "none",
+        "--exit-code": "none",
+        "--quiet": "none",
+        "--cached": "none",
+        "--staged": "none",
+        "--pickaxe-regex": "none",
+        "--pickaxe-all": "none",
+        "--no-index": "none",
+        "--relative": "string",
+        "--diff-filter": "string",
+        "-p": "none",
+        "-u": "none",
+        "-s": "none",
+        "-M": "none",
+        "-C": "none",
+        "-B": "none",
+        "-D": "none",
+        "-l": "none",
+        "-S": "string",
+        "-G": "string",
+        "-O": "string",
+        "-R": "none",
+    },
+    "log": {
+        "--oneline": "none",
+        "--graph": "none",
+        "--decorate": "none",
+        "--no-decorate": "none",
+        "--date": "string",
+        "--relative-date": "none",
+        "--all": "none",
+        "--branches": "none",
+        "--tags": "none",
+        "--remotes": "none",
+        "--since": "string",
+        "--after": "string",
+        "--until": "string",
+        "--before": "string",
+        "--max-count": "number",
+        "-n": "number",
+        "--stat": "none",
+        "--numstat": "none",
+        "--shortstat": "none",
+        "--name-only": "none",
+        "--name-status": "none",
+        "--color": "none",
+        "--no-color": "none",
+        "--patch": "none",
+        "-p": "none",
+        "--no-patch": "none",
+        "--no-ext-diff": "none",
+        "-s": "none",
+        "--author": "string",
+        "--committer": "string",
+        "--grep": "string",
+        "--abbrev-commit": "none",
+        "--full-history": "none",
+        "--dense": "none",
+        "--sparse": "none",
+        "--simplify-merges": "none",
+        "--ancestry-path": "none",
+        "--source": "none",
+        "--first-parent": "none",
+        "--merges": "none",
+        "--no-merges": "none",
+        "--reverse": "none",
+        "--walk-reflogs": "none",
+        "--skip": "number",
+        "--max-age": "number",
+        "--min-age": "number",
+        "--no-min-parents": "none",
+        "--no-max-parents": "none",
+        "--follow": "none",
+        "--no-walk": "none",
+        "--left-right": "none",
+        "--cherry-mark": "none",
+        "--cherry-pick": "none",
+        "--boundary": "none",
+        "--topo-order": "none",
+        "--date-order": "none",
+        "--author-date-order": "none",
+        "--pretty": "string",
+        "--format": "string",
+        "--diff-filter": "string",
+        "-S": "string",
+        "-G": "string",
+        "--pickaxe-regex": "none",
+        "--pickaxe-all": "none",
+    },
+    "status": {
+        "--short": "none",
+        "-s": "none",
+        "--branch": "none",
+        "-b": "none",
+        "--porcelain": "none",
+        "--long": "none",
+        "--verbose": "none",
+        "-v": "none",
+        "--untracked-files": "string",
+        "-u": "string",
+        "--ignored": "none",
+        "--ignore-submodules": "string",
+        "--column": "none",
+        "--no-column": "none",
+        "--ahead-behind": "none",
+        "--no-ahead-behind": "none",
+        "--renames": "none",
+        "--no-renames": "none",
+        "--find-renames": "string",
+        "-M": "string",
+    },
+}
+
 
 def _extract_bash_base_command(command: str) -> str | None:
     """Extract the base command name from a bash command string.
@@ -144,6 +298,88 @@ def _extract_bash_path_args(command: str) -> list[str]:
         return []
     # Skip the base command, collect non-flag arguments.
     return [w for w in words[1:] if not w.startswith("-")]
+
+
+def _flag_accepts_value(kind: str, value: str) -> bool:
+    """Return True if a flag value matches the expected primitive kind."""
+    if kind == "string":
+        return bool(value)
+    if kind == "number":
+        return value.isdigit()
+    return False
+
+
+def _git_flags_are_safe(argv: list[str]) -> bool:
+    """Validate a parsed ``git <subcommand>`` argv against the allowlist."""
+    if len(argv) < 2 or argv[0].rsplit("/", 1)[-1] != "git":
+        return False
+    subcommand = argv[1]
+    safe_flags = _GIT_READ_ONLY_COMMANDS.get(subcommand)
+    if safe_flags is None:
+        return False
+
+    i = 2
+    while i < len(argv):
+        arg = argv[i]
+
+        # Runtime expansion can turn an apparently positional argument into a
+        # flag or path we did not validate.
+        if "$" in arg or "`" in arg:
+            return False
+
+        if arg == "--":
+            return True
+
+        if not arg.startswith("-") or arg == "-":
+            i += 1
+            continue
+
+        name = arg
+        value: str | None = None
+        if arg.startswith("--") and "=" in arg:
+            name, value = arg.split("=", 1)
+
+        kind = safe_flags.get(name)
+        if kind is None:
+            return False
+        if kind == "none":
+            if value is not None:
+                return False
+            i += 1
+            continue
+
+        if value is None:
+            i += 1
+            if i >= len(argv):
+                return False
+            value = argv[i]
+        if not _flag_accepts_value(kind, value):
+            return False
+        i += 1
+
+    return True
+
+
+def _is_read_only_git_bash(command: str) -> bool:
+    """Return True if a Bash command is safely read-only git usage."""
+    from open_shrimp.bash_parse import check_compound_safety, parse_command
+
+    result = parse_command(command)
+    if result.kind != "simple" or not result.commands:
+        return False
+
+    safety_reason = check_compound_safety([cmd.text for cmd in result.commands])
+    if safety_reason is not None:
+        return False
+
+    for cmd in result.commands:
+        # Do not auto-approve env-var overrides or redirects.  Both can change
+        # git behavior or write files despite a read-only-looking subcommand.
+        if cmd.env_vars or cmd.redirects:
+            return False
+        if not _git_flags_are_safe(cmd.argv):
+            return False
+    return True
 
 
 def _is_dangerous_rm_target(path: str) -> bool:
@@ -604,6 +840,20 @@ def make_can_use_tool(
                     tool_name,
                     tool_path,
                 )
+
+        # Claude Code parity: auto-approve a conservative set of read-only git
+        # Bash commands (git diff/log/status) when the parsed argv and flags are
+        # safe.  This is intentionally independent of configured allowed_tools,
+        # and unsafe/unknown flags fall through to the normal approval prompt.
+        if (
+            tool_name == "Bash"
+            and _is_read_only_git_bash(tool_input.get("command", ""))
+        ):
+            logger.info(
+                "Auto-approved read-only git Bash command: %s",
+                tool_input.get("command", "")[:100],
+            )
+            return PermissionResultAllow()
 
         # Accept-all-edits mode: also auto-approve common safe Bash
         # commands (mkdir, touch, rm, mv, cp, sed, etc.) that complement
