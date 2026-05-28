@@ -43,7 +43,8 @@ def _build_question_keyboard(state: _QuestionState) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(f"\u2713 {display}", callback_data=f"q_noop:{qid}")])
 
     # "Other" button for custom text input
-    buttons.append([InlineKeyboardButton("Other\u2026", callback_data=f"q_other:{qid}")])
+    if state.allow_custom:
+        buttons.append([InlineKeyboardButton("Other\u2026", callback_data=f"q_other:{qid}")])
 
     if state.multi_select:
         count = len(state.selected) + len(state.other_texts)
@@ -77,17 +78,19 @@ async def _send_question_keyboard(
     bot: Bot,
     scope: ChatScope,
     question: dict[str, Any],
-) -> str:
+) -> Any:
     """Present a question via inline keyboard and wait for the user's answer.
 
     Returns the selected option label (or custom "Other" text).
     """
     options = question.get("options", [])
-    multi_select = question.get("multiSelect", False)
+    multi_select = question.get("multiSelect", question.get("multiple", False))
+    allow_custom = question.get("custom", True)
+    structured_answers = bool(question.get("_structuredAnswers", False))
     question_id = uuid.uuid4().hex[:8]
 
     loop = asyncio.get_running_loop()
-    future: asyncio.Future[str] = loop.create_future()
+    future: asyncio.Future[Any] = loop.create_future()
 
     state = _QuestionState(
         question_id=question_id,
@@ -95,6 +98,8 @@ async def _send_question_keyboard(
         options=options,
         multi_select=multi_select,
         future=future,
+        structured_answers=structured_answers,
+        allow_custom=bool(allow_custom),
     )
     _question_states[question_id] = state
 
@@ -139,6 +144,30 @@ async def _handle_ask_user_questions(
         question_text = q.get("question", "")
         answer = await _send_question_keyboard(bot, scope, q)
         answers[question_text] = answer
+
+    return answers
+
+
+async def _handle_opencode_questions(
+    bot: Bot,
+    scope: ChatScope,
+    questions: list[dict[str, Any]],
+    draft_state: _DraftState,
+) -> list[list[str]]:
+    """Present native OpenCode questions and return structured answers."""
+    await finalize_and_reset(bot, draft_state)
+
+    answers: list[list[str]] = []
+    for q in questions:
+        q = dict(q)
+        q["multiSelect"] = q.get("multiSelect", q.get("multiple", False))
+        q.setdefault("custom", True)
+        q["_structuredAnswers"] = True
+        answer = await _send_question_keyboard(bot, scope, q)
+        if isinstance(answer, list):
+            answers.append([str(item) for item in answer])
+        else:
+            answers.append([str(answer)])
 
     return answers
 
@@ -269,7 +298,10 @@ async def _handle_question_callback(
         labels.extend(state.other_texts)
 
         result = ", ".join(labels) if labels else "None selected"
-        state.future.set_result(result)
+        if state.structured_answers:
+            state.future.set_result(labels)
+        else:
+            state.future.set_result(result)
         await query.answer(f"Done: {result[:50]}")
 
         # Update message to show selections, remove keyboard
@@ -286,6 +318,9 @@ async def _handle_question_callback(
         return True
 
     if action == "q_other":
+        if not state.allow_custom:
+            await query.answer("Custom answers are not available.")
+            return True
         # "Other..." -- mark that we're waiting for a typed answer.
         # We must NOT await here because python-telegram-bot processes
         # updates sequentially by default; blocking would deadlock the

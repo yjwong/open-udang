@@ -18,7 +18,7 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -244,6 +244,9 @@ class CallbackContext:
 
     request_approval: ApprovalCallback | None = None
     handle_user_questions: QuestionCallback | None = None
+    handle_opencode_questions: (
+        Callable[[list[dict[str, Any]]], Awaitable[list[list[str]]]] | None
+    ) = None
     is_edit_auto_approved: Callable[[], bool] | None = None
     notify_auto_approved_edit: EditNotifyCallback | None = None
     is_tool_auto_approved: Callable[[str, dict[str, Any]], bool] | None = None
@@ -322,6 +325,7 @@ async def get_or_create_session(
             if _is_client_alive(existing.client):
                 existing.callback_context.request_approval = callback_context.request_approval
                 existing.callback_context.handle_user_questions = callback_context.handle_user_questions
+                existing.callback_context.handle_opencode_questions = callback_context.handle_opencode_questions
                 existing.callback_context.is_edit_auto_approved = callback_context.is_edit_auto_approved
                 existing.callback_context.notify_auto_approved_edit = callback_context.notify_auto_approved_edit
                 existing.callback_context.is_tool_auto_approved = callback_context.is_tool_auto_approved
@@ -548,6 +552,7 @@ async def get_or_create_session(
         include_partial_messages=True,
         stderr=_log_stderr,
         can_use_tool=can_use_tool,
+        handle_questions=_make_opencode_questions_proxy(callback_context),
         cli_path=cli_path,
         max_buffer_size=10 * 1024 * 1024,  # 10MB
     )
@@ -1010,6 +1015,20 @@ def _make_questions_proxy(
             logger.warning("No question callback set, returning empty answers")
             return {}
         return await ctx.handle_user_questions(questions)
+
+    return _proxy
+
+
+def _make_opencode_questions_proxy(
+    ctx: CallbackContext,
+) -> Callable[[list[dict[str, Any]]], Awaitable[list[list[str]]]]:
+    async def _proxy(
+        questions: list[dict[str, Any]],
+    ) -> list[list[str]]:
+        if ctx.handle_opencode_questions is None:
+            logger.warning("No OpenCode question callback set, returning empty answers")
+            return []
+        return await ctx.handle_opencode_questions(questions)
 
     return _proxy
 

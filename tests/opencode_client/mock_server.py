@@ -30,6 +30,9 @@ class MockOpenCode:
         self.prompts: list[dict[str, Any]] = []
         # Records permission replies for assertions.
         self.permission_replies: list[dict[str, Any]] = []
+        # Records question replies/rejections for assertions.
+        self.question_replies: list[dict[str, Any]] = []
+        self.question_rejections: list[str] = []
         # Records session patches (e.g. update_permission_rules).
         self.patched_sessions: list[dict[str, Any]] = []
         # Records aborts.
@@ -76,6 +79,16 @@ class MockOpenCode:
                 Route(
                     "/permission/{rid}/reply",
                     self._permission_reply,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/question/{rid}/reply",
+                    self._question_reply,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/question/{rid}/reject",
+                    self._question_reject,
                     methods=["POST"],
                 ),
             ]
@@ -184,6 +197,20 @@ class MockOpenCode:
             body = {}
         self.permission_replies.append({"request_id": rid, "body": body})
         return JSONResponse({"ok": True})
+
+    async def _question_reply(self, request: Request) -> Response:
+        rid = request.path_params["rid"]
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        self.question_replies.append({"request_id": rid, "body": body})
+        return JSONResponse({"ok": True})
+
+    async def _question_reject(self, request: Request) -> Response:
+        rid = request.path_params["rid"]
+        self.question_rejections.append(rid)
+        return Response(status_code=204)
 
     async def _list_sessions(self, request: Request) -> Response:
         # Real OpenCode does an exact directory match; mirror it.
@@ -411,5 +438,19 @@ def permission_asked(
             "metadata": metadata or {},
             "always": always or [],
             "tool": {"messageID": message_id, "callID": call_id},
+        },
+    }
+
+
+def question_asked(
+    request_id: str,
+    questions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a ``question.asked`` event matching the OpenCode wire shape."""
+    return {
+        "type": "question.asked",
+        "properties": {
+            "id": request_id,
+            "questions": questions,
         },
     }

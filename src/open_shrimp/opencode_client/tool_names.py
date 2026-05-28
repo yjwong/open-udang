@@ -69,10 +69,13 @@ CATEGORY_TO_HOOKS: dict[str, str] = {
 # Categories the OpenCode baseline defaults to ``allow`` (see
 # ``opencode/packages/core/src/agent/agent.ts``). We rewrite these to
 # ``ask`` at session-create so open-shrimp's hooks.py owns the policy.
+# ``question`` is intentionally not mapped to ``AskUserQuestion``; its
+# blocking lifecycle is handled by the native ``question.asked`` event arm.
 OPENCODE_PERMISSION_CATEGORIES: tuple[str, ...] = (
     "bash",
     "read",
     "edit",
+    "question",
     "webfetch",
     "webwrite",
     "external_directory",

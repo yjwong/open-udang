@@ -213,9 +213,11 @@ class _QuestionState:
     scope: ChatScope
     options: list[dict[str, Any]]
     multi_select: bool
-    future: asyncio.Future[str]
+    future: asyncio.Future[Any]
     selected: set[int] = field(default_factory=set)
     other_texts: list[str] = field(default_factory=list)
+    structured_answers: bool = False
+    allow_custom: bool = True
     message_id: int | None = None
     waiting_for_other: bool = False
     """True when the user clicked "Other..." and we're waiting for their text input."""

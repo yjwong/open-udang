@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +38,9 @@ class OpenCodeOptions:
     add_dirs: list[str] | None = None  # → external_directory allow rules
     stderr: Callable[[str], None] | None = None
     can_use_tool: Callable[..., Any] | None = None
+    handle_questions: (
+        Callable[[list[dict[str, Any]]], Awaitable[list[list[str]]]] | None
+    ) = None
     system_prompt: str | dict[str, Any] | None = None  # → system on prompt_async
 
     # Accepted-but-ignored fields (kwargs-compat with ClaudeAgentOptions).

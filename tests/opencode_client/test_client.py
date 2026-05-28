@@ -18,6 +18,7 @@ from open_shrimp.opencode_client import (
 
 from tests.opencode_client.mock_server import (
     MockOpenCode,
+    question_asked,
     session_error,
     session_idle,
     text_delta,
@@ -176,3 +177,81 @@ async def test_invalid_model_surfaces_after_204(
             async for _ in client.receive_response():
                 pass
     assert "model not found" in str(exc.value)
+
+
+async def test_question_asked_replies_with_structured_answers(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    seen_questions: list[list[dict]] = []
+
+    async def handle_questions(questions):
+        seen_questions.append(questions)
+        return [["Choice A"], ["Choice B", "Custom text"]]
+
+    opts = OpenCodeOptions(
+        cwd="/tmp",
+        provider="openai",
+        model="gpt-test",
+        handle_questions=handle_questions,
+    )
+    async with OpenCodeClient(opts) as client:
+        sid = client.session_id
+        assert sid is not None
+        mock_server.script(
+            sid,
+            [
+                question_asked(
+                    "q_1",
+                    [
+                        {"question": "First?", "options": [], "multiple": False},
+                        {"question": "Second?", "options": [], "multiple": True},
+                    ],
+                ),
+                session_idle(),
+            ],
+        )
+        await client.query("hi")
+        await _collect(client)
+
+    assert len(seen_questions) == 1
+    assert seen_questions[0][0]["question"] == "First?"
+    assert mock_server.question_replies == [
+        {
+            "request_id": "q_1",
+            "body": {"answers": [["Choice A"], ["Choice B", "Custom text"]]},
+        }
+    ]
+
+
+async def test_question_asked_rejects_on_handler_failure(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    async def handle_questions(questions):
+        raise RuntimeError("no UI")
+
+    opts = OpenCodeOptions(
+        cwd="/tmp",
+        provider="openai",
+        model="gpt-test",
+        handle_questions=handle_questions,
+    )
+    async with OpenCodeClient(opts) as client:
+        sid = client.session_id
+        assert sid is not None
+        mock_server.script(sid, [question_asked("q_fail", []), session_idle()])
+        await client.query("hi")
+        await _collect(client)
+
+    assert mock_server.question_replies == []
+    assert mock_server.question_rejections == ["q_fail"]
+
+
+async def test_session_permission_rules_allow_question(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/tmp", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts):
+        pass
+
+    rules = mock_server.created_sessions[0]["body"]["permission"]
+    assert {"permission": "question", "pattern": "*", "action": "allow"} in rules

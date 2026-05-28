@@ -40,6 +40,7 @@ EVT_MESSAGE_PART_DELTA = "message.part.delta"
 EVT_MESSAGE_PART_UPDATED = "message.part.updated"
 EVT_MESSAGE_UPDATED = "message.updated"
 EVT_PERMISSION_ASKED = "permission.asked"
+EVT_QUESTION_ASKED = "question.asked"
 EVT_SESSION_IDLE = "session.idle"
 EVT_SESSION_ERROR = "session.error"
 
@@ -55,7 +56,7 @@ _PART_TYPE_TOOL = "tool"
 _PART_TYPE_REASONING = "reasoning"
 
 _MUTATING_OPENCODE_PERMS = frozenset({"edit", "write", "apply_patch"})
-_ALWAYS_ALLOWED_OPENCODE_PERMS = frozenset({"todowrite"})
+_ALWAYS_ALLOWED_OPENCODE_PERMS = frozenset({"question", "todowrite"})
 
 
 _BUS_REGISTRY: dict[int, EventBus] = {}
@@ -365,7 +366,9 @@ class OpenCodeClient:
         async for msg in _iter_response(
             self._events,
             self._session_id,
+            self._http,
             self._bridge,
+            self._options.handle_questions,
         ):
             yield msg
 
@@ -437,7 +440,9 @@ def _resolve_part_id(props: dict[str, Any]) -> str | None:
 async def _iter_response(
     queue: EventQueue,
     session_id: str,
+    http: httpx.AsyncClient | None,
     bridge: PermissionBridge | None,
+    handle_questions,
 ) -> AsyncIterator[Message]:
     """Translate SSE events into wrapper messages until session.idle."""
     text_buffers: dict[str, list[str]] = {}
@@ -611,7 +616,96 @@ async def _iter_response(
                 bridge.observe_permission_asked(evt)
             continue
 
+        if etype == EVT_QUESTION_ASKED:
+            await _handle_question_asked(http, evt, handle_questions)
+            continue
+
         logger.debug("dropping event type=%s", etype)
+
+
+async def _handle_question_asked(
+    http: httpx.AsyncClient | None,
+    evt: dict[str, Any],
+    handle_questions,
+) -> None:
+    props = evt.get("properties") or {}
+    if not isinstance(props, dict):
+        props = {}
+    request_id = props.get("requestID") or props.get("id")
+    if not isinstance(request_id, str) or not request_id:
+        logger.warning("question.asked missing request id: %r", evt)
+        return
+    if http is None:
+        logger.warning("question.asked without HTTP client; rejecting %s", request_id)
+        return
+
+    questions = _extract_questions(props)
+    if handle_questions is None:
+        logger.warning("No native question handler set; rejecting %s", request_id)
+        await _reject_question(http, request_id)
+        return
+
+    try:
+        answers = await handle_questions(questions)
+        await _reply_question(http, request_id, answers)
+    except asyncio.CancelledError:
+        await _reject_question(http, request_id)
+        raise
+    except Exception:
+        logger.exception("Question handler failed; rejecting %s", request_id)
+        await _reject_question(http, request_id)
+
+
+def _extract_questions(props: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = props.get("questions")
+    if isinstance(raw, list):
+        return [q for q in raw if isinstance(q, dict)]
+    raw = props.get("question")
+    if isinstance(raw, dict):
+        return [raw]
+    return []
+
+
+async def _reply_question(
+    http: httpx.AsyncClient,
+    request_id: str,
+    answers: Any,
+) -> None:
+    if not isinstance(answers, list):
+        answers = []
+    normalised: list[list[str]] = []
+    for answer in answers:
+        if isinstance(answer, list):
+            normalised.append([str(item) for item in answer])
+        else:
+            normalised.append([str(answer)])
+    try:
+        r = await http.post(
+            f"/question/{request_id}/reply",
+            json={"answers": normalised},
+        )
+    except httpx.HTTPError as exc:
+        raise CLIConnectionError(
+            f"POST /question/{request_id}/reply failed: {exc}"
+        ) from exc
+    if r.status_code >= 400:
+        raise ProcessError(
+            f"POST /question/{request_id}/reply returned "
+            f"{r.status_code}: {r.text[:300]}"
+        )
+
+
+async def _reject_question(http: httpx.AsyncClient, request_id: str) -> None:
+    try:
+        r = await http.post(f"/question/{request_id}/reject")
+    except httpx.HTTPError:
+        logger.exception("POST /question/%s/reject failed", request_id)
+        return
+    if r.status_code >= 400:
+        logger.warning(
+            "POST /question/%s/reject returned %s: %s",
+            request_id, r.status_code, r.text[:300],
+        )
 
 
 def _new_token_bucket() -> dict[str, Any]:

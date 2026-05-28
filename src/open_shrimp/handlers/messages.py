@@ -38,6 +38,7 @@ from open_shrimp.hooks import matches_approval_rule as _matches_rule
 from open_shrimp.handlers.questions import (
     _complete_other_input,
     _handle_ask_user_questions,
+    _handle_opencode_questions,
 )
 from open_shrimp.handlers.state import (
     _edit_approved_sessions,
@@ -684,6 +685,13 @@ async def _start_agent_task(
                     context.bot, scope, questions, draft_state
                 )
 
+            async def handle_opencode_questions(
+                questions: list[dict[str, Any]],
+            ) -> list[list[str]]:
+                return await _handle_opencode_questions(
+                    context.bot, scope, questions, draft_state
+                )
+
             async def notify_edit(
                 tool_name: str, tool_input: dict[str, Any]
             ) -> None:
@@ -737,6 +745,7 @@ async def _start_agent_task(
             cb_ctx = CallbackContext(
                 request_approval=request_approval,
                 handle_user_questions=handle_questions,
+                handle_opencode_questions=handle_opencode_questions,
                 is_edit_auto_approved=lambda: (scope, ctx_name) in _edit_approved_sessions,
                 notify_auto_approved_edit=notify_edit,
                 is_tool_auto_approved=lambda tn, ti: any(
