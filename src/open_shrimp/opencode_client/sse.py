@@ -25,6 +25,10 @@ _BACKOFF_MAX = 30.0
 EVT_SERVER_CONNECTED = "server.connected"
 
 
+class EventQueueClosed(Exception):
+    """Raised when a local subscriber queue is closed intentionally."""
+
+
 class EventQueue:
     """Per-session bounded queue. Drops oldest on overflow."""
 
@@ -61,7 +65,7 @@ class EventQueue:
     async def get(self) -> dict[str, Any]:
         evt = await self._q.get()
         if evt is None:
-            raise asyncio.CancelledError("event queue closed")
+            raise EventQueueClosed
         return evt
 
     def close(self) -> None:

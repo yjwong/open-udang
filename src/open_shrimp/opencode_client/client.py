@@ -27,7 +27,7 @@ from open_shrimp.opencode_client.events import (
 from open_shrimp.opencode_client.options import OpenCodeOptions
 from open_shrimp.opencode_client.permission import PermissionBridge
 from open_shrimp.opencode_client.process import OpenCodeServer
-from open_shrimp.opencode_client.sse import EventBus, EventQueue
+from open_shrimp.opencode_client.sse import EventBus, EventQueue, EventQueueClosed
 from open_shrimp.opencode_client.tool_names import (
     OPENCODE_PERMISSION_CATEGORIES,
     opencode_to_hooks,
@@ -602,8 +602,8 @@ async def _iter_response(
     while True:
         try:
             evt = await queue.get()
-        except asyncio.CancelledError:
-            raise ProcessError("opencode serve dropped the session")
+        except EventQueueClosed:
+            return
 
         etype = evt.get("type", "")
         props = evt.get("properties") or {}
