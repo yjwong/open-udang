@@ -244,7 +244,7 @@ def _build_status_text(
         context_window = _DEFAULT_CONTEXT_LIMIT
         if model_usage:
             first_model = next(iter(model_usage.values()))
-            # TODO(phase-5): per-model contextWindow lookup. OpenCode's
+            # TODO: per-model contextWindow lookup. OpenCode's
             # step.started doesn't carry a context window; for now fall
             # back to _DEFAULT_CONTEXT_LIMIT.
             context_window = first_model.get(

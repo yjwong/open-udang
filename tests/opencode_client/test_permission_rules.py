@@ -33,3 +33,42 @@ def test_mutating_tools_are_not_auto_allowed_from_config() -> None:
         and rule["action"] == "allow"
         for rule in rules
     )
+
+
+def test_openshrimp_schedule_mutations_ask_by_default() -> None:
+    rules = _client(["openshrimp_send_file"])._build_initial_rules()
+
+    assert {
+        "permission": "openshrimp_create_schedule",
+        "pattern": "*",
+        "action": "ask",
+    } in rules
+    assert {
+        "permission": "openshrimp_delete_schedule",
+        "pattern": "*",
+        "action": "ask",
+    } in rules
+
+
+def test_openshrimp_schedule_mutations_can_be_allowed_explicitly() -> None:
+    rules = _client(["openshrimp_create_schedule"])._build_initial_rules()
+
+    matching = [
+        rule for rule in rules
+        if rule["permission"] == "openshrimp_create_schedule"
+    ]
+    assert matching[-1] == {
+        "permission": "openshrimp_create_schedule",
+        "pattern": "*",
+        "action": "allow",
+    }
+
+
+def test_old_sdk_mcp_tool_names_map_to_opencode_names() -> None:
+    rules = _client(["mcp__openshrimp__send_file"])._build_initial_rules()
+
+    assert {
+        "permission": "openshrimp_send_file",
+        "pattern": "*",
+        "action": "allow",
+    } in rules

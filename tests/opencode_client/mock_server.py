@@ -37,6 +37,8 @@ class MockOpenCode:
         self.patched_sessions: list[dict[str, Any]] = []
         # Records aborts.
         self.aborted_sessions: list[str] = []
+        # Records dynamic MCP server registrations.
+        self.mcp_registrations: list[dict[str, Any]] = []
         # Per-session "stored" messages used by GET /session/{sid}/message/{mid}.
         # Tests script this when they need the bridge's message-fetch
         # fallback to find a matching ToolPart.
@@ -75,6 +77,11 @@ class MockOpenCode:
                     "/session/{sid}/message/{mid}",
                     self._get_message,
                     methods=["GET"],
+                ),
+                Route(
+                    "/mcp",
+                    self._add_mcp,
+                    methods=["POST"],
                 ),
                 Route(
                     "/permission/{rid}/reply",
@@ -188,6 +195,16 @@ class MockOpenCode:
         if key in self.messages:
             return JSONResponse(self.messages[key])
         return Response(status_code=404)
+
+    async def _add_mcp(self, request: Request) -> Response:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        self.mcp_registrations.append(
+            {"body": body, "params": dict(request.query_params)}
+        )
+        return JSONResponse({"ok": True})
 
     async def _permission_reply(self, request: Request) -> Response:
         rid = request.path_params["rid"]

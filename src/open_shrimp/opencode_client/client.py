@@ -56,6 +56,10 @@ _PART_TYPE_TOOL = "tool"
 _PART_TYPE_REASONING = "reasoning"
 
 _MUTATING_OPENCODE_PERMS = frozenset({"edit", "write", "apply_patch"})
+_ASK_BY_DEFAULT_MCP_PERMS = frozenset({
+    "openshrimp_create_schedule",
+    "openshrimp_delete_schedule",
+})
 _ALWAYS_ALLOWED_OPENCODE_PERMS = frozenset({"question", "todowrite"})
 
 
@@ -129,6 +133,7 @@ class OpenCodeClient:
             headers={"Authorization": self._server.auth_header},
         )
         try:
+            await self._register_mcp_servers()
             if self._options.resume:
                 self._session_id = self._options.resume
                 try:
@@ -185,6 +190,32 @@ class OpenCodeClient:
             raise ProcessError(f"POST /session returned no id: {payload!r}")
         return sid
 
+    async def _register_mcp_servers(self) -> None:
+        """Register dynamic MCP servers with OpenCode before session use."""
+        if self._http is None or not self._options.mcp_servers:
+            return
+        params: dict[str, str] = {}
+        if self._options.cwd:
+            params["directory"] = self._options.cwd
+        for name, raw_config in self._options.mcp_servers.items():
+            config = _coerce_mcp_config(name, raw_config)
+            try:
+                r = await self._http.post(
+                    "/mcp",
+                    params=params,
+                    json={"name": name, "config": config},
+                )
+            except httpx.HTTPError as exc:
+                raise CLIConnectionError(
+                    f"failed to register MCP server {name!r}: {exc}"
+                ) from exc
+            if r.status_code == 401:
+                raise OpenCodeAuthError("opencode serve rejected our credentials")
+            if r.status_code >= 400:
+                raise ProcessError(
+                    f"POST /mcp for {name!r} returned {r.status_code}: {r.text[:300]}"
+                )
+
     def _build_initial_rules(self) -> list[dict[str, Any]]:
         """Construct the initial permission ruleset for this session.
 
@@ -202,11 +233,18 @@ class OpenCodeClient:
             rules.append(
                 {"permission": permission, "pattern": "*", "action": "allow"}
             )
-        rules.extend(self._rules_from_allowed_tools())
+        rules.extend(self._rules_from_allowed_tools(include=_ASK_BY_DEFAULT_MCP_PERMS, invert=True))
+        for permission in sorted(_ASK_BY_DEFAULT_MCP_PERMS):
+            rules.append({"permission": permission, "pattern": "*", "action": "ask"})
+        rules.extend(self._rules_from_allowed_tools(include=_ASK_BY_DEFAULT_MCP_PERMS))
         rules.extend(self._rules_from_add_dirs())
         return rules
 
-    def _rules_from_allowed_tools(self) -> list[dict[str, Any]]:
+    def _rules_from_allowed_tools(
+        self,
+        include: frozenset[str] | None = None,
+        invert: bool = False,
+    ) -> list[dict[str, Any]]:
         """Translate ``allowed_tools`` entries to OpenCode allow rules.
 
         Mutating tools (edit/write/apply_patch) are intentionally skipped —
@@ -220,6 +258,11 @@ class OpenCodeClient:
                 continue
             permission, pattern = _parse_allowed_tool(entry)
             if permission is None:
+                continue
+            in_include = include is None or permission in include
+            if invert:
+                in_include = include is not None and permission not in include
+            if not in_include:
                 continue
             if permission in _MUTATING_OPENCODE_PERMS:
                 continue
@@ -389,13 +432,68 @@ def _parse_allowed_tool(entry: str) -> tuple[str | None, str | None]:
         text = head.strip()
         pattern = tail[:-1].strip() or None
     # Treat MCP qualified names (mcp__server__tool, server_tool) as
-    # opaque permission names — no translation.
+    # opaque permission names. OpenCode exposes MCP tools as server_tool.
     if text.startswith("mcp__"):
+        parts = text.split("__", 2)
+        if len(parts) == 3:
+            return f"{parts[1]}_{parts[2]}", pattern
         return text, pattern
     if text.startswith("_"):
         return text, pattern
     lowered = text.lower()
     return lowered, pattern
+
+
+def _coerce_mcp_config(name: str, raw_config: Any) -> dict[str, Any]:
+    if not isinstance(name, str) or not name:
+        raise ValueError("MCP server name must be a non-empty string")
+    if not isinstance(raw_config, dict):
+        raise ValueError(f"MCP server {name!r} config must be an object")
+    config = dict(raw_config)
+    if "command" in config and "type" not in config:
+        command = config.pop("command")
+        if not isinstance(command, str) or not command:
+            raise ValueError(f"MCP server {name!r} command must be a string")
+        args = config.pop("args", [])
+        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+            raise ValueError(f"MCP server {name!r} args must be a string list")
+        env = config.pop("env", config.pop("environment", None))
+        out: dict[str, Any] = {"type": "local", "command": [command, *args]}
+        if env is not None:
+            if not isinstance(env, dict):
+                raise ValueError(f"MCP server {name!r} environment must be an object")
+            out["environment"] = {str(k): str(v) for k, v in env.items()}
+        return out
+    cfg_type = config.get("type")
+    if cfg_type in {"remote", "http", "sse"}:
+        url = config.get("url")
+        if not isinstance(url, str) or not url:
+            raise ValueError(f"MCP server {name!r} remote config requires url")
+        out = {"type": "remote", "url": url}
+        if "headers" in config:
+            headers = config["headers"]
+            if not isinstance(headers, dict):
+                raise ValueError(f"MCP server {name!r} headers must be an object")
+            out["headers"] = {str(k): str(v) for k, v in headers.items()}
+        if "oauth" in config:
+            out["oauth"] = config["oauth"]
+        if "enabled" in config:
+            out["enabled"] = bool(config["enabled"])
+        if "timeout" in config:
+            out["timeout"] = config["timeout"]
+        return out
+    if cfg_type == "local":
+        command = config.get("command")
+        if not isinstance(command, list) or not all(isinstance(arg, str) for arg in command):
+            raise ValueError(f"MCP server {name!r} local command must be a string list")
+        out = {"type": "local", "command": command}
+        if "environment" in config:
+            env = config["environment"]
+            if not isinstance(env, dict):
+                raise ValueError(f"MCP server {name!r} environment must be an object")
+            out["environment"] = {str(k): str(v) for k, v in env.items()}
+        return out
+    raise ValueError(f"Unsupported MCP config for {name!r}: {raw_config!r}")
 
 
 def _coerce_system_prompt(value: Any) -> str:

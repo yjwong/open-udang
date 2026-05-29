@@ -46,7 +46,6 @@ from open_shrimp.hooks import (
     HostBashApprovalCallback,
 )
 from open_shrimp.sandbox import Sandbox, SandboxManager
-from open_shrimp.tools import create_openshrimp_mcp_server
 
 logger = logging.getLogger(__name__)
 
@@ -391,15 +390,13 @@ async def get_or_create_session(
     # Auto-approve the built-in OpenShrimp MCP tools (send_file, send_photo)
     # alongside whatever the user configured.
     allowed_tools = list(context.allowed_tools or [])
-    allowed_tools.append("mcp__openshrimp__send_file")
+    allowed_tools.append("openshrimp_send_file")
     if scope.thread_id is not None:
-        allowed_tools.append("mcp__openshrimp__edit_topic")
+        allowed_tools.append("openshrimp_edit_topic")
     # Auto-approve scheduling tools when available.
     if db is not None and config is not None and job_queue is not None:
         allowed_tools.extend([
-            "mcp__openshrimp__create_schedule",
-            "mcp__openshrimp__list_schedules",
-            "mcp__openshrimp__delete_schedule",
+            "openshrimp_list_schedules",
         ])
     # Auto-approve computer use tools when enabled.
     _computer_use_enabled = (
@@ -407,14 +404,6 @@ async def get_or_create_session(
         or (context.sandbox is not None and context.sandbox.computer_use)
     )
     if _computer_use_enabled:
-        allowed_tools.extend([
-            "mcp__openshrimp__computer_screenshot",
-            "mcp__openshrimp__computer_click",
-            "mcp__openshrimp__computer_type",
-            "mcp__openshrimp__computer_key",
-            "mcp__openshrimp__computer_scroll",
-            "mcp__openshrimp__computer_toplevel",
-        ])
         # Auto-approve Playwright MCP browser tools (core + tabs,
         # always enabled).  Tool names from microsoft/playwright-mcp.
         allowed_tools.extend([
@@ -603,30 +592,33 @@ async def get_or_create_session(
             "append": "\n\n".join(system_prompt_parts),
         }
 
-    # Register in-process MCP tools (send_file, send_photo, etc.) so the
-    # agent can send files directly to the Telegram chat.
+    # Register scope-bound OpenShrimp MCP tools so the agent can send files,
+    # update forum topics, and manage schedules for this chat/thread only.
     if bot is not None:
-        # Sudo mode (host_bash) is registered only when the context's
-        # sandbox config explicitly opts in. Commands run with cwd set to
-        # the context's source directory so they operate on the same tree
-        # the agent sees inside the sandbox, just unsandboxed.
-        _host_bash_workdir: str | None = None
-        if (
-            context.sandbox is not None
-            and context.sandbox.allow_host_escape
-        ):
-            _host_bash_workdir = context.directory
-
-        openshrimp_server = create_openshrimp_mcp_server(
-            bot=bot, chat_id=scope.chat_id, thread_id=scope.thread_id,
-            db=db, config=config, job_queue=job_queue,
-            sandbox=sandbox,
+        if mcp_proxy is None:
+            raise RuntimeError("MCP proxy is required for OpenShrimp tools under OpenCode")
+        if is_containerized:
+            raise NotImplementedError(
+                "Sandboxed OpenCode MCP tools are not implemented yet"
+            )
+        scope_token = mcp_proxy.register_tool_scope(
             context_name=context_name,
+            chat_id=scope.chat_id,
+            thread_id=scope.thread_id,
             user_id=user_id,
             is_private_chat=is_private_chat,
-            host_bash_workdir=_host_bash_workdir,
+            bot=bot,
+            db=db,
+            config=config,
+            job_queue=job_queue,
         )
-        mcp_servers: dict[str, Any] = {"openshrimp": openshrimp_server}
+        mcp_servers: dict[str, Any] = {
+            "openshrimp": {
+                "type": "remote",
+                "url": mcp_proxy.get_tools_url(scope_token, "127.0.0.1"),
+                "oauth": False,
+            }
+        }
 
         # Add Playwright MCP for structured browser automation in
         # computer-use contexts.  The CLI runs inside the sandbox,
@@ -665,7 +657,7 @@ async def get_or_create_session(
                 host_ip = sandbox.host_address
                 for name in stdio_servers:
                     mcp_servers[name] = {
-                        "type": "http",
+                        "type": "remote",
                         "url": mcp_proxy.get_proxy_url(
                             context_name, name, host_ip
                         ),
@@ -675,7 +667,7 @@ async def get_or_create_session(
                     }
                 for name, http_cfg in http_servers.items():
                     mcp_servers[name] = {
-                        "type": http_cfg.transport,
+                        "type": "remote",
                         "url": mcp_proxy.get_http_proxy_url(
                             context_name, name, host_ip
                         ),
@@ -735,7 +727,7 @@ async def get_or_create_session(
         context_name=context_name,
         callback_context=callback_context,
         sandbox=sandbox,
-        mcp_proxy=mcp_proxy if is_containerized else None,
+        mcp_proxy=mcp_proxy,
         wrapper_cleanup_paths=wrapper_cleanup_paths,
     )
 

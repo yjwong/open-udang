@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from open_shrimp.bot import run_bot
-from open_shrimp.config import DEFAULT_CONFIG_PATH, is_sandboxed, load_config
+from open_shrimp.config import DEFAULT_CONFIG_PATH, load_config
 from open_shrimp.db import init_db
 from open_shrimp.paths import init_paths
 from open_shrimp.sandbox import SandboxManager, create_sandbox_managers
@@ -175,15 +175,12 @@ async def run_bot_async(config_path: str, stop_event: asyncio.Event | None = Non
 
     sandbox_mgrs = create_sandbox_managers(config)
 
-    # Start the MCP proxy if any context uses a sandbox.  The proxy
-    # runs on a separate listener so that sandboxes cannot reach the
-    # main Starlette server (review-app, config-app, etc.).
-    mcp_proxy = None
-    if any(is_sandboxed(ctx) for ctx in config.contexts.values()):
-        from open_shrimp.mcp_proxy import McpProxy
+    # Start the MCP proxy. It hosts both sandbox MCP proxies and the
+    # scope-bound OpenShrimp tools endpoint used by OpenCode.
+    from open_shrimp.mcp_proxy import McpProxy
 
-        mcp_proxy = McpProxy()
-        await mcp_proxy.start()
+    mcp_proxy = McpProxy()
+    await mcp_proxy.start()
 
     http_server = _create_http_server(
         config, db, sandbox_managers=sandbox_mgrs, config_path=config_path

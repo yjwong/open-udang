@@ -671,7 +671,7 @@ class LibvirtSandbox:
     def get_text_input_active(self) -> bool:
         return False
 
-    # -- Computer-use operations (Phase 4) -----------------------------------
+    # -- Computer-use operations --------------------------------------------
 
     def take_screenshot(self, output_path: Path) -> None:
         """Take a screenshot of the VM display via QMP ``screendump``.

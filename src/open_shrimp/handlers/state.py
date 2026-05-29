@@ -40,7 +40,7 @@ _scope_dispatch_locks: dict[ChatScope, asyncio.Lock] = {}
 _injectable_sessions: dict[ChatScope, AgentSession] = {}
 
 # ---------------------------------------------------------------------------
-# Per-scope queue for messages that arrive during the brief setup phase
+# Per-scope queue for messages that arrive during brief setup.
 # (before the session is ready for injection).  Drained immediately once
 # the session becomes injectable.
 # ---------------------------------------------------------------------------

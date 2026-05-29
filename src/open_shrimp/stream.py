@@ -385,7 +385,7 @@ def extract_tool_summary(
         )
         total = len(todos)
         return f"{completed}/{total} done"
-    if tool_name == "mcp__openshrimp__send_file":
+    if tool_name in {"openshrimp_send_file", "mcp__openshrimp__send_file"}:
         path = tool_input.get("file_path", "")
         basename = os.path.basename(path) if path else ""
         caption = tool_input.get("caption", "")

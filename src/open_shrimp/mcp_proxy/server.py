@@ -35,8 +35,13 @@ from open_shrimp.mcp_proxy.config_reader import (
     StdioServerConfig,
 )
 from open_shrimp.mcp_proxy.credentials import get_oauth_credential, is_expired
-from open_shrimp.mcp_proxy.registry import ContextRegistration, ProxyRegistry
+from open_shrimp.mcp_proxy.registry import (
+    ContextRegistration,
+    ProxyRegistry,
+    ToolScopeRegistration,
+)
 from open_shrimp.mcp_proxy.stdio_manager import StdioManager
+from open_shrimp.tools import OpenShrimpTool, create_openshrimp_tools
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +161,31 @@ def _create_proxy_app(
 
         return await _forward_http(request, reg.context_name, server_name, config, http_client)
 
+    async def tools_endpoint(request: Request) -> Response:
+        scope_token: str = request.path_params["scope_token"]
+        reg = registry.get_tool_scope(scope_token)
+        if reg is None:
+            return JSONResponse({"error": "unknown tool scope"}, status_code=404)
+        if request.method in {"GET", "DELETE"}:
+            return Response(status_code=202)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}},
+                status_code=400,
+            )
+        if isinstance(body, list):
+            responses = [await _handle_tools_rpc(item, reg) for item in body]
+            responses = [r for r in responses if r is not None]
+            if not responses:
+                return Response(status_code=202)
+            return JSONResponse(responses)
+        response = await _handle_tools_rpc(body, reg)
+        if response is None:
+            return Response(status_code=202)
+        return JSONResponse(response)
+
     routes = [
         Route(
             "/mcp/{context_name}/{server_name}",
@@ -167,9 +197,96 @@ def _create_proxy_app(
             http_endpoint,
             methods=["GET", "POST", "DELETE", "OPTIONS", "HEAD"],
         ),
+        Route(
+            "/tools/{scope_token}",
+            tools_endpoint,
+            methods=["GET", "POST", "DELETE"],
+        ),
     ]
 
     return Starlette(routes=routes)
+
+
+async def _handle_tools_rpc(
+    body: Any,
+    reg: ToolScopeRegistration,
+) -> dict[str, Any] | None:
+    if not isinstance(body, dict):
+        return _rpc_error(None, -32600, "Invalid Request")
+    request_id = body.get("id")
+    method = body.get("method")
+    if not isinstance(method, str):
+        return _rpc_error(request_id, -32600, "Invalid Request")
+
+    if method == "notifications/initialized":
+        return None
+    if method == "initialize":
+        return _rpc_result(request_id, {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "openshrimp", "version": "0.1.0"},
+        })
+
+    tools = _tools_for_registration(reg)
+    by_name = {tool.name: tool for tool in tools}
+    if method == "tools/list":
+        return _rpc_result(request_id, {
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                    "annotations": {"readOnlyHint": tool.read_only},
+                }
+                for tool in tools
+            ]
+        })
+    if method == "tools/call":
+        params = body.get("params") or {}
+        if not isinstance(params, dict):
+            return _rpc_error(request_id, -32602, "Invalid params")
+        name = params.get("name")
+        args = params.get("arguments") or {}
+        if not isinstance(name, str) or not isinstance(args, dict):
+            return _rpc_error(request_id, -32602, "Invalid params")
+        tool = by_name.get(name)
+        if tool is None:
+            return _rpc_error(request_id, -32602, f"Unknown tool: {name}")
+        try:
+            return _rpc_result(request_id, await tool.handler(args))
+        except Exception as exc:
+            logger.exception("OpenShrimp tool %s failed", name)
+            return _rpc_result(request_id, {
+                "content": [{"type": "text", "text": f"Error: {exc}"}],
+                "is_error": True,
+            })
+    return _rpc_error(request_id, -32601, f"Method not found: {method}")
+
+
+def _tools_for_registration(reg: ToolScopeRegistration) -> list[OpenShrimpTool]:
+    return create_openshrimp_tools(
+        bot=reg.bot,
+        chat_id=reg.chat_id,
+        thread_id=reg.thread_id,
+        db=reg.db,
+        config=reg.config,
+        job_queue=reg.job_queue,
+        context_name=reg.context_name,
+        user_id=reg.user_id,
+        is_private_chat=reg.is_private_chat,
+    )
+
+
+def _rpc_result(request_id: Any, result: Any) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
 
 
 # -----------------------------------------------------------------------
@@ -284,6 +401,32 @@ class McpProxy:
             context_name, servers=servers, http_servers=http_servers
         )
 
+    def register_tool_scope(
+        self,
+        *,
+        context_name: str,
+        chat_id: int,
+        thread_id: int | None,
+        user_id: int,
+        is_private_chat: bool,
+        bot: Any,
+        db: Any | None = None,
+        config: Any | None = None,
+        job_queue: Any | None = None,
+    ) -> str:
+        """Register a scope-bound OpenShrimp tools endpoint."""
+        return self._registry.register_tool_scope(
+            context_name=context_name,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            is_private_chat=is_private_chat,
+            bot=bot,
+            db=db,
+            config=config,
+            job_queue=job_queue,
+        )
+
     async def unregister_context(self, context_name: str) -> None:
         """Unregister a context and stop its stdio processes."""
         self._registry.unregister_context(context_name)
@@ -306,6 +449,10 @@ class McpProxy:
     ) -> str:
         """Build the URL a sandbox should use to reach an HTTP-proxied server."""
         return f"http://{host_ip}:{self.port}/http/{context_name}/{server_name}"
+
+    def get_tools_url(self, scope_token: str, host_ip: str) -> str:
+        """Build the URL OpenCode should use for scope-bound OpenShrimp tools."""
+        return f"http://{host_ip}:{self.port}/tools/{scope_token}"
 
     async def start(self) -> None:
         """Start the HTTP server on an OS-assigned port."""

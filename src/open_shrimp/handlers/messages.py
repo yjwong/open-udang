@@ -786,7 +786,7 @@ async def _start_agent_task(
             # injected via client.query() instead of queued.
             _injectable_sessions[scope] = session
 
-            # Drain any messages that arrived during the setup phase.
+            # Drain any messages that arrived during setup.
             setup_queue = _setup_queues.pop(scope, [])
             for queued_prompt, queued_attachments in setup_queue:
                 queued_paths: list[Path] = []
