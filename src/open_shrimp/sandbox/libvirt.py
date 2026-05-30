@@ -539,9 +539,13 @@ class LibvirtSandbox:
         ssh_key = self._sdir / "ssh_key"
 
         from open_shrimp.claude_binary import find_claude_binary
+        from open_shrimp.sandbox.docker_helpers import _find_opencode_binary
         from open_shrimp.sandbox.libvirt_helpers import _ssh_common_opts
 
-        cli_binary = find_claude_binary()
+        binaries = {
+            "claude": find_claude_binary(),
+            "opencode": _find_opencode_binary(),
+        }
         ssh_opts = _ssh_common_opts(ssh_key, self._ssh_port)
         scp_opts = [
             "-i", str(ssh_key),
@@ -551,35 +555,36 @@ class LibvirtSandbox:
             "-o", "LogLevel=ERROR",
         ]
 
-        # Check if claude is already available in the VM.
-        result = subprocess.run(
-            ["ssh", *ssh_opts, "claude@localhost", "which", "claude"],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            # SCP the Claude CLI binary into the VM.
-            logger.info("Installing Claude CLI into VM %s...", self._dom_name)
+        for name, binary in binaries.items():
+            result = subprocess.run(
+                ["ssh", *ssh_opts, "claude@localhost", "which", name],
+                capture_output=True,
+            )
+            if result.returncode == 0:
+                continue
+
+            logger.info("Installing %s CLI into VM %s...", name, self._dom_name)
             subprocess.run(
                 [
                     "scp", *scp_opts,
-                    str(cli_binary),
-                    "claude@localhost:/tmp/claude",
+                    str(binary),
+                    f"claude@localhost:/tmp/{name}",
                 ],
                 check=True,
                 capture_output=True,
             )
-            # Move to /usr/local/bin (needs sudo).
             subprocess.run(
                 [
                     "ssh", *ssh_opts,
                     "claude@localhost",
                     "--",
-                    "sudo mv /tmp/claude /usr/local/bin/claude && sudo chmod +x /usr/local/bin/claude",
+                    f"sudo mv /tmp/{name} /usr/local/bin/{name} && "
+                    f"sudo chmod +x /usr/local/bin/{name}",
                 ],
                 check=True,
                 capture_output=True,
             )
-            logger.info("Claude CLI installed in VM %s", self._dom_name)
+            logger.info("%s CLI installed in VM %s", name, self._dom_name)
 
         # Copy credentials into the host-side claude-home directory.
         # This directory is shared into the VM as /home/claude/.claude
