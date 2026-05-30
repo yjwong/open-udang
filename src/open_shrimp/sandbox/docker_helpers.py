@@ -82,6 +82,9 @@ CONTAINER_IMAGE = "openshrimp-claude:latest"
 # Docker image name for computer-use (GUI) contexts.
 COMPUTER_USE_IMAGE = "openshrimp-computer-use:latest"
 
+# Fixed in-container port for sandbox-owned OpenCode servers.
+OPENCODE_GUEST_PORT = 4096
+
 # Base directory for per-context container state (session storage, etc.).
 def container_state_dir() -> Path:
     """Return the base directory for per-context Docker sandbox state."""
@@ -209,6 +212,10 @@ def ensure_image(
         cli_dest = build_dir_path / "claude"
         if not cli_dest.exists() or not cli_dest.samefile(Path(cli_binary)):
             shutil.copy2(cli_binary, cli_dest)
+        opencode_binary = _find_opencode_binary()
+        opencode_dest = build_dir_path / "opencode"
+        if not opencode_dest.exists() or not opencode_dest.samefile(Path(opencode_binary)):
+            shutil.copy2(opencode_binary, opencode_dest)
         extra_args = None
         if base_image:
             extra_args = ["--build-arg", f"BASE_IMAGE={base_image}"]
@@ -237,6 +244,7 @@ def ensure_image(
         ) as build_dir:
             build_path = Path(build_dir)
             shutil.copy2(cli_binary, build_path / "claude")
+            shutil.copy2(_find_opencode_binary(), build_path / "opencode")
             (build_path / "Dockerfile").write_text(dockerfile_text, encoding="utf-8")
             _docker_build(
                 image_name=image_name,
@@ -352,6 +360,7 @@ def _docker_build(
         "-t", image_name,
         "-f", dockerfile_name,
         "--build-arg", "CLAUDE_CLI=claude",
+        "--build-arg", "OPENCODE_BIN=opencode",
     ]
     if extra_build_args:
         cmd.extend(extra_build_args)
@@ -396,6 +405,48 @@ def _ensure_state_dir(context_name: str) -> Path:
     state_dir = container_state_dir() / context_name
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir
+
+
+def get_opencode_home_dir(context_name: str) -> Path:
+    """Return the host-side OpenCode state directory for a context."""
+    path = _ensure_state_dir(context_name) / "opencode-home"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _find_opencode_binary() -> str:
+    env_bin = os.environ.get("OPENCODE_BIN")
+    if env_bin and Path(env_bin).is_file():
+        return env_bin
+    home_bin = Path.home() / ".opencode" / "bin" / "opencode"
+    if home_bin.is_file():
+        return str(home_bin)
+    which = shutil.which("opencode")
+    if which:
+        return which
+    raise RuntimeError(
+        "Could not find the `opencode` binary for the sandbox image. "
+        "Set OPENCODE_BIN or install it at ~/.opencode/bin/opencode."
+    )
+
+
+def get_opencode_host_port(context_name: str) -> int | None:
+    """Return the host-mapped OpenCode port for a container, or None."""
+    name = _container_name(context_name)
+    result = subprocess.run(
+        ["docker", "port", name, str(OPENCODE_GUEST_PORT)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.strip().splitlines():
+        port_str = line.rsplit(":", 1)[-1]
+        try:
+            return int(port_str)
+        except ValueError:
+            continue
+    return None
 
 
 def check_docker_available() -> bool:
@@ -671,11 +722,16 @@ def _build_docker_run_argv(
     # outputs are written to the host-visible state directory.
     claude_tmp_dir = state_dir / "tmp"
     claude_tmp_dir.mkdir(exist_ok=True)
+    opencode_home = get_opencode_home_dir(context_name)
     docker_argv.extend([
         "-v", f"{project_dir}:{project_dir}",
         "-v", f"{state_dir}:/home/claude/.claude",
+        "-v", f"{opencode_home}:/home/claude/.local/share/opencode",
         "-v", f"{claude_tmp_dir}:/tmp/claude-{uid}",
     ])
+
+    # Expose the sandbox-owned OpenCode server to the host via loopback.
+    docker_argv.extend(["-p", f"127.0.0.1::{OPENCODE_GUEST_PORT}"])
     # Sub-mount on top of state_dir; Docker resolves nested binds in flag order.
     host_skills = Path.home() / ".claude" / "skills"
     if host_skills.is_dir():

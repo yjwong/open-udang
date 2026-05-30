@@ -49,6 +49,7 @@ RUN apt-get update \
 # The actual uid/gid is set at runtime via --user, but the directory
 # must exist and be writable.
 RUN mkdir -p /home/claude/.claude /home/claude/.local/share/docker \
+        /home/claude/.local/share/opencode \
     && chmod -R 777 /home/claude
 
 # Allow the runtime user (arbitrary uid via --user) to write subuid/subgid
@@ -64,8 +65,14 @@ ARG CLAUDE_CLI=.venv/lib/python3.11/site-packages/claude_agent_sdk/_bundled/clau
 COPY ${CLAUDE_CLI} /usr/local/bin/claude
 RUN chmod +x /usr/local/bin/claude
 
+# Copy the OpenCode CLI binary for sandboxed OpenCode server mode.
+ARG OPENCODE_BIN=opencode
+COPY ${OPENCODE_BIN} /usr/local/bin/opencode
+RUN chmod +x /usr/local/bin/opencode
+
 # Verify it runs.
 RUN /usr/local/bin/claude --version || true
+RUN /usr/local/bin/opencode --version || true
 
 ENV HOME=/home/claude
 WORKDIR /workspace

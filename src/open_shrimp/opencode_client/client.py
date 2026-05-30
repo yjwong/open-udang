@@ -26,7 +26,7 @@ from open_shrimp.opencode_client.events import (
 )
 from open_shrimp.opencode_client.options import OpenCodeOptions
 from open_shrimp.opencode_client.permission import PermissionBridge
-from open_shrimp.opencode_client.process import OpenCodeServer
+from open_shrimp.opencode_client.process import OpenCodeEndpoint, OpenCodeServer
 from open_shrimp.opencode_client.sse import EventBus, EventQueue, EventQueueClosed
 from open_shrimp.opencode_client.tool_names import (
     OPENCODE_PERMISSION_CATEGORIES,
@@ -63,20 +63,21 @@ _ASK_BY_DEFAULT_MCP_PERMS = frozenset({
 _ALWAYS_ALLOWED_OPENCODE_PERMS = frozenset({"question", "todowrite"})
 
 
-_BUS_REGISTRY: dict[int, EventBus] = {}
+_BUS_REGISTRY: dict[tuple[str, str], EventBus] = {}
 _BUS_LOCK: asyncio.Lock | None = None
 
 
-async def _get_bus(server: OpenCodeServer) -> EventBus:
+async def _get_bus(server: OpenCodeServer | OpenCodeEndpoint) -> EventBus:
     global _BUS_LOCK
     if _BUS_LOCK is None:
         _BUS_LOCK = asyncio.Lock()
     async with _BUS_LOCK:
-        bus = _BUS_REGISTRY.get(id(server))
+        key = (server.base_url, server.auth_header)
+        bus = _BUS_REGISTRY.get(key)
         if bus is None:
             bus = EventBus(server)
             await bus.start()
-            _BUS_REGISTRY[id(server)] = bus
+            _BUS_REGISTRY[key] = bus
         return bus
 
 
@@ -93,7 +94,7 @@ async def _shutdown_buses() -> None:
 class OpenCodeClient:
     def __init__(self, options: OpenCodeOptions) -> None:
         self._options = options
-        self._server: OpenCodeServer | None = None
+        self._server: OpenCodeServer | OpenCodeEndpoint | None = None
         self._bus: EventBus | None = None
         self._events: EventQueue | None = None
         self._http: httpx.AsyncClient | None = None
@@ -117,6 +118,14 @@ class OpenCodeClient:
         server = self._server
         if server is None:
             return False
+        if isinstance(server, OpenCodeEndpoint):
+            owner = server.owner
+            proc = getattr(owner, "_opencode_proc", None)
+            if proc is not None:
+                poll = getattr(proc, "poll", None)
+                if callable(poll):
+                    return poll() is None
+            return True
         proc = getattr(server, "proc", None)
         if proc is None:
             return False
@@ -125,7 +134,7 @@ class OpenCodeClient:
     async def connect(self) -> None:
         if self._server is not None:
             return
-        self._server = await OpenCodeServer.get_or_start()
+        self._server = self._options.endpoint or await OpenCodeServer.get_or_start()
         self._bus = await _get_bus(self._server)
         self._http = httpx.AsyncClient(
             base_url=self._server.base_url,

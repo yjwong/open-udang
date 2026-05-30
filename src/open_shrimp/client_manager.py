@@ -26,6 +26,7 @@ from typing import Any
 from open_shrimp.opencode_client import (
     CLIConnectionError,
     OpenCodeClient,
+    OpenCodeEndpoint,
     OpenCodeOptions,
     ProcessError,
     ResultMessage,
@@ -438,16 +439,20 @@ async def get_or_create_session(
             "mcp__playwright__browser_verify_list_visible",
             "mcp__playwright__browser_verify_text_visible",
             "mcp__playwright__browser_verify_value",
+            "openshrimp_computer_screenshot",
+            "openshrimp_computer_click",
+            "openshrimp_computer_type",
+            "openshrimp_computer_key",
+            "openshrimp_computer_scroll",
+            "openshrimp_computer_toplevel",
         ])
-
-    # When sandboxed, generate a wrapper script that runs the Claude CLI
-    # in an isolated environment.  The wrapper is pointed at via cli_path;
-    # all other SDK machinery (stdin/stdout streaming, canUseTool, MCP) is
-    # unchanged.
-    sandbox: Sandbox | None = None
-    cli_path: str | None = None
-    wrapper_cleanup_paths: list[str] = []
     is_containerized = is_sandboxed(context)
+    if is_containerized:
+        allowed_tools.append("bash")
+
+    sandbox: Sandbox | None = None
+    endpoint: OpenCodeEndpoint | None = None
+    wrapper_cleanup_paths: list[str] = []
     if is_containerized:
         assert sandbox_manager is not None, (
             "sandbox_manager is required for containerized contexts"
@@ -505,7 +510,7 @@ async def get_or_create_session(
             _sandbox = sandbox  # capture for closure
             _mgr = sandbox_manager  # capture for closure
 
-            def _ensure_and_build_wrapper() -> tuple[str, list[str]]:
+            def _ensure_and_start_opencode() -> OpenCodeEndpoint:
                 try:
                     _sandbox.ensure_environment(log_file=log_file)
                     _sandbox.ensure_running(log_file=log_file)
@@ -514,15 +519,20 @@ async def get_or_create_session(
                         assert _mgr is not None
                         _mgr.unregister_build(context_name)
                 _sandbox.provision_workspace()
-                return _sandbox.build_cli_wrapper()
+                server = _sandbox.ensure_opencode_server(log_file=log_file)
+                return OpenCodeEndpoint(
+                    base_url=server.base_url,
+                    auth_header=server.auth_header,
+                    owner=_sandbox,
+                )
 
-            cli_path, wrapper_cleanup_paths = await asyncio.to_thread(
-                _ensure_and_build_wrapper,
+            endpoint = await asyncio.to_thread(
+                _ensure_and_start_opencode,
             )
             logger.info(
-                "Sandbox context '%s': using wrapper %s",
+                "Sandbox context '%s': using OpenCode endpoint %s",
                 context_name,
-                cli_path,
+                endpoint.base_url,
             )
 
     _provider, _model = split_provider_model(context.model)
@@ -538,7 +548,7 @@ async def get_or_create_session(
         stderr=_log_stderr,
         can_use_tool=can_use_tool,
         handle_questions=_make_questions_proxy(callback_context),
-        cli_path=cli_path,
+        endpoint=endpoint,
         max_buffer_size=10 * 1024 * 1024,  # 10MB
     )
 
@@ -597,25 +607,35 @@ async def get_or_create_session(
     if bot is not None:
         if mcp_proxy is None:
             raise RuntimeError("MCP proxy is required for OpenShrimp tools under OpenCode")
-        if is_containerized:
-            raise NotImplementedError(
-                "Sandboxed OpenCode MCP tools are not implemented yet"
+        from open_shrimp.tools import create_openshrimp_tools
+
+        def _tool_factory():
+            return create_openshrimp_tools(
+                bot=bot,
+                chat_id=scope.chat_id,
+                thread_id=scope.thread_id,
+                db=db,
+                config=config,
+                job_queue=job_queue,
+                context_name=context_name,
+                user_id=user_id,
+                is_private_chat=is_private_chat,
+                include_sandbox_tools=_computer_use_sandbox is not None,
+                sandbox=_computer_use_sandbox,
             )
+
         scope_token = mcp_proxy.register_tool_scope(
             context_name=context_name,
             chat_id=scope.chat_id,
             thread_id=scope.thread_id,
             user_id=user_id,
-            is_private_chat=is_private_chat,
-            bot=bot,
-            db=db,
-            config=config,
-            job_queue=job_queue,
+            tool_factory=_tool_factory,
         )
+        mcp_host = sandbox.host_address if is_containerized and sandbox is not None else "127.0.0.1"
         mcp_servers: dict[str, Any] = {
             "openshrimp": {
                 "type": "remote",
-                "url": mcp_proxy.get_tools_url(scope_token, "127.0.0.1"),
+                "url": mcp_proxy.get_tools_url(scope_token, mcp_host),
                 "oauth": False,
             }
         }
@@ -626,8 +646,9 @@ async def get_or_create_session(
         # inside the sandbox automatically.
         if _computer_use_sandbox is not None:
             mcp_servers["playwright"] = {
-                "command": "npx",
-                "args": [
+                "type": "local",
+                "command": [
+                    "npx",
                     "@playwright/mcp",
                     "--cdp-endpoint", "http://localhost:9222",
                     "--caps", "pdf",

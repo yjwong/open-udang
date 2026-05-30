@@ -3,7 +3,11 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from open_shrimp.sandbox.docker_helpers import ensure_image, CONTAINER_IMAGE
+from open_shrimp.sandbox.docker_helpers import (
+    OPENCODE_GUEST_PORT,
+    _build_docker_run_argv,
+    ensure_image,
+)
 
 
 def test_ensure_image_skips_when_image_exists():
@@ -40,6 +44,7 @@ def test_ensure_image_builds_when_missing(tmp_path):
         patch("open_shrimp.sandbox.docker_helpers.subprocess.run", mock_run),
         patch("open_shrimp.sandbox.docker_helpers.subprocess.Popen", mock_popen),
         patch("open_shrimp.sandbox.docker_helpers.find_claude_binary", return_value=str(fake_binary)),
+        patch("open_shrimp.sandbox.docker_helpers._find_opencode_binary", return_value=str(fake_binary)),
     ):
         ensure_image()
 
@@ -72,6 +77,27 @@ def test_ensure_image_raises_on_build_failure(tmp_path):
         patch("open_shrimp.sandbox.docker_helpers.subprocess.run", mock_run),
         patch("open_shrimp.sandbox.docker_helpers.subprocess.Popen", mock_popen),
         patch("open_shrimp.sandbox.docker_helpers.find_claude_binary", return_value=str(fake_binary)),
+        patch("open_shrimp.sandbox.docker_helpers._find_opencode_binary", return_value=str(fake_binary)),
     ):
         with pytest.raises(RuntimeError, match="Failed to build"):
             ensure_image()
+
+
+def test_docker_run_mounts_opencode_home_and_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "open_shrimp.sandbox.docker_helpers.container_state_dir",
+        lambda: tmp_path / "containers",
+    )
+    with patch(
+        "open_shrimp.sandbox.docker_helpers.subprocess.check_output",
+        side_effect=FileNotFoundError,
+    ):
+        argv, _ = _build_docker_run_argv(
+            context_name="dev",
+            project_dir="/workspace/project",
+        )
+
+    joined = "\n".join(argv)
+    assert f"{tmp_path}/containers/dev/opencode-home:/home/claude/.local/share/opencode" in joined
+    assert "-p" in argv
+    assert f"127.0.0.1::{OPENCODE_GUEST_PORT}" in argv

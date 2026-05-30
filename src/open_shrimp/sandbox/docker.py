@@ -7,12 +7,17 @@ Wraps the free functions in :mod:`open_shrimp.sandbox.docker_helpers` into a
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
+import secrets
+import select
 import subprocess
+import threading
+import time
 from pathlib import Path
 
-from open_shrimp.sandbox.base import PortForward, VncQuirk
+from open_shrimp.sandbox.base import PortForward, SandboxOpenCodeServer, VncQuirk
 
 import open_shrimp.sandbox.docker_helpers as _dh
 
@@ -23,12 +28,65 @@ from open_shrimp.sandbox.docker_helpers import (
     ensure_container_running as _ensure_container_running,
     ensure_image as _ensure_image,
     get_screenshots_dir as _get_screenshots_dir,
+    get_opencode_home_dir as _get_opencode_home_dir,
+    get_opencode_host_port as _get_opencode_host_port,
     get_text_input_active as _get_text_input_active,
     get_text_input_state_path as _get_text_input_state_path,
     get_vnc_port as _get_vnc_port,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _append_log(log_file: Path | None, line: str) -> None:
+    if log_file is None:
+        return
+    try:
+        with open(log_file, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+            fh.flush()
+    except OSError:
+        logger.debug("Failed to append OpenCode sandbox log", exc_info=True)
+
+
+def _wait_for_opencode_ready(
+    proc: subprocess.Popen[str], *, log_file: Path | None = None,
+    timeout: float = 20.0,
+) -> None:
+    assert proc.stdout is not None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+        if not ready:
+            if proc.poll() is not None:
+                raise RuntimeError("sandboxed opencode serve exited before readiness")
+            continue
+        line = proc.stdout.readline()
+        if line:
+            stripped = line.rstrip()
+            if stripped:
+                logger.info("[sandbox opencode] %s", stripped)
+                _append_log(log_file, stripped)
+            if "listening on" in stripped:
+                return
+            continue
+        if proc.poll() is not None:
+            raise RuntimeError("sandboxed opencode serve exited before readiness")
+        time.sleep(0.05)
+    raise RuntimeError("sandboxed opencode serve did not become ready in time")
+
+
+def _drain_opencode_output(
+    proc: subprocess.Popen[str], log_file: Path | None,
+) -> None:
+    stream = proc.stdout
+    if stream is None:
+        return
+    for line in stream:
+        stripped = line.rstrip()
+        if stripped:
+            logger.debug("[sandbox opencode] %s", stripped)
+            _append_log(log_file, stripped)
 
 
 class DockerSandbox:
@@ -62,6 +120,10 @@ class DockerSandbox:
             self._image_name = _dh.COMPUTER_USE_IMAGE
         else:
             self._image_name = _dh.CONTAINER_IMAGE
+        self._opencode_proc: subprocess.Popen[str] | None = None
+        self._opencode_endpoint: SandboxOpenCodeServer | None = None
+        self._opencode_password: str | None = None
+        self._opencode_drain_thread: threading.Thread | None = None
 
     # -- Sandbox protocol -----------------------------------------------------
 
@@ -141,7 +203,85 @@ class DockerSandbox:
         )
         return path, [path]
 
+    def opencode_home_dir(self) -> Path:
+        return _get_opencode_home_dir(self._context_name)
+
+    def ensure_opencode_server(
+        self, *, log_file: Path | None = None,
+    ) -> SandboxOpenCodeServer:
+        if self._opencode_endpoint is not None and self._opencode_proc is not None:
+            if self._opencode_proc.poll() is None:
+                return self._opencode_endpoint
+
+        host_port = _get_opencode_host_port(self._context_name)
+        if host_port is None:
+            logger.info(
+                "Recreating container %s to add OpenCode port binding",
+                self.container_name,
+            )
+            self.stop()
+            self.ensure_running(log_file=log_file)
+            host_port = _get_opencode_host_port(self._context_name)
+        if host_port is None:
+            raise RuntimeError(
+                f"Container {self.container_name} has no OpenCode port binding. "
+                "Recreate the sandbox container and try again."
+            )
+
+        password = secrets.token_hex(32)
+        token = base64.b64encode(f"opencode:{password}".encode()).decode("ascii")
+        endpoint = SandboxOpenCodeServer(
+            base_url=f"http://127.0.0.1:{host_port}",
+            auth_header=f"Basic {token}",
+            cleanup_paths=[],
+        )
+        cmd = [
+            "docker", "exec",
+            "-e", "HOME=/home/claude",
+            "-e", f"OPENCODE_SERVER_PASSWORD={password}",
+            "-w", self._project_dir,
+            self.container_name,
+            "opencode", "serve",
+            "--hostname", "0.0.0.0",
+            "--port", str(_dh.OPENCODE_GUEST_PORT),
+            "--print-logs",
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            _wait_for_opencode_ready(proc, log_file=log_file)
+        except Exception:
+            proc.terminate()
+            raise
+        self._opencode_proc = proc
+        self._opencode_endpoint = endpoint
+        self._opencode_password = password
+        self._opencode_drain_thread = threading.Thread(
+            target=_drain_opencode_output,
+            args=(proc, log_file),
+            daemon=True,
+        )
+        self._opencode_drain_thread.start()
+        logger.info(
+            "Sandbox context '%s': OpenCode server up at %s",
+            self._context_name,
+            endpoint.base_url,
+        )
+        return endpoint
+
     def stop(self) -> None:
+        if self._opencode_proc is not None and self._opencode_proc.poll() is None:
+            self._opencode_proc.terminate()
+            try:
+                self._opencode_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._opencode_proc.kill()
+        self._opencode_proc = None
+        self._opencode_endpoint = None
         name = self.container_name
         if name:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)

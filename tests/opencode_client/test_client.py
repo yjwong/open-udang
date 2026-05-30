@@ -6,9 +6,11 @@ import asyncio
 
 import pytest
 
+from open_shrimp.opencode_client import client as client_mod
 from open_shrimp.opencode_client import (
     AssistantMessage,
     OpenCodeClient,
+    OpenCodeEndpoint,
     OpenCodeOptions,
     ProcessError,
     ResultMessage,
@@ -162,6 +164,34 @@ async def test_post_session_passes_directory(
             pass
     assert mock_server.created_sessions
     assert mock_server.created_sessions[0]["params"].get("directory") == "/path/to/ctx"
+
+
+async def test_supplied_endpoint_skips_host_singleton(mock_setup, monkeypatch) -> None:
+    mock_server, base_url = mock_setup
+
+    async def fail_get_or_start(cls):
+        raise AssertionError("host singleton should not be used")
+
+    monkeypatch.setattr(
+        "open_shrimp.opencode_client.client.OpenCodeServer.get_or_start",
+        classmethod(fail_get_or_start),
+    )
+    opts = OpenCodeOptions(
+        cwd="/tmp",
+        provider="openai",
+        model="gpt-test",
+        endpoint=OpenCodeEndpoint(base_url=base_url, auth_header="Basic test"),
+    )
+    async with OpenCodeClient(opts) as client:
+        sid = client.session_id
+        assert sid is not None
+        mock_server.script(sid, [session_idle()])
+        await client.query("hi")
+        async for _ in client.receive_response():
+            pass
+
+    assert mock_server.created_sessions
+    await client_mod._shutdown_buses()
 
 
 async def test_invalid_model_surfaces_after_204(

@@ -20,7 +20,7 @@ import threading
 import time
 from pathlib import Path
 
-from open_shrimp.sandbox.base import PortForward, VncQuirk
+from open_shrimp.sandbox.base import PortForward, SandboxOpenCodeServer, VncQuirk
 from open_shrimp.sandbox.port_forward import (
     SSH_TUNNEL_OPTS,
     PortForwardRegistry,
@@ -586,6 +586,17 @@ class LibvirtSandbox:
             claude_home_dir=self._claude_home_dir,
         )
         return path, [path]
+
+    def opencode_home_dir(self) -> Path:
+        return self._sdir / "opencode-home"
+
+    def ensure_opencode_server(
+        self, *, log_file: Path | None = None,
+    ) -> SandboxOpenCodeServer:
+        raise NotImplementedError(
+            "Sandboxed OpenCode is not yet implemented for backend 'libvirt'. "
+            "Use Docker or disable sandbox for this context."
+        )
 
     def stop(self) -> None:
         """Gracefully shutdown the VM (ACPI), with destroy fallback."""

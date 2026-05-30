@@ -24,6 +24,7 @@ from open_shrimp.sandbox.base import (
     VNC_QUIRK_RFB_BGRA_PIXEL_FORMAT,
     VNC_QUIRK_RFB_DROPS_SET_ENCODINGS,
     PortForward,
+    SandboxOpenCodeServer,
     VncQuirk,
 )
 from open_shrimp.sandbox.port_forward import (
@@ -329,6 +330,17 @@ class LimaSandbox:
             guest_os=self._guest_os,
         )
         return path, [path]
+
+    def opencode_home_dir(self) -> Path:
+        return self._sdir / "opencode-home"
+
+    def ensure_opencode_server(
+        self, *, log_file: Path | None = None,
+    ) -> SandboxOpenCodeServer:
+        raise NotImplementedError(
+            "Sandboxed OpenCode is not yet implemented for backend 'lima'. "
+            "Use Docker or disable sandbox for this context."
+        )
 
     def stop(self) -> None:
         """Stop the Lima instance and any SSH tunnels."""

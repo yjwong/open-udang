@@ -1,10 +1,9 @@
-"""Sandbox abstraction for isolated Claude CLI execution.
+"""Sandbox abstraction for isolated agent execution.
 
 Defines the :class:`Sandbox` protocol that encapsulates different isolation
-backends (Docker containers, Lima/libvirt VMs, etc.) behind a
-common lifecycle interface.  The SDK's ``cli_path`` option is pointed at a
-wrapper script produced by :meth:`Sandbox.build_cli_wrapper`; all other SDK
-machinery (stdin/stdout streaming, canUseTool callbacks, MCP) works unchanged.
+backends (Docker containers, Lima/libvirt VMs, etc.) behind a common lifecycle
+interface.  OpenCode paths use :meth:`Sandbox.ensure_opencode_server`; the
+legacy Claude SDK compatibility path still uses :meth:`Sandbox.build_cli_wrapper`.
 
 Use :meth:`SandboxManager.create_sandbox
 <open_shrimp.sandbox.manager.SandboxManager.create_sandbox>` to instantiate
@@ -16,6 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, Protocol, runtime_checkable
+
+
+@dataclass(frozen=True)
+class SandboxOpenCodeServer:
+    """OpenCode server endpoint owned by a sandbox backend."""
+
+    base_url: str
+    auth_header: str
+    cleanup_paths: list[Path]
 
 
 @dataclass(frozen=True)
@@ -56,7 +64,7 @@ VncQuirk = Literal["rfb_drops_set_encodings", "rfb_bgra_pixel_format"]
 
 @runtime_checkable
 class Sandbox(Protocol):
-    """Isolated execution environment for the Claude CLI.
+    """Isolated execution environment for an agent runtime.
 
     A single instance represents one VM/container and is shared across
     multiple sessions (ChatScopes) using the same context.  Instances
@@ -66,8 +74,9 @@ class Sandbox(Protocol):
         1. ``ensure_environment()`` — build image / provision VM (slow, idempotent)
         2. ``ensure_running()`` — start container / check SSH (fast when warm)
         3. ``provision_workspace()`` — sync files into sandbox (idempotent)
-        4. ``build_cli_wrapper()`` — generate shell script for ``cli_path``
-        5. ``stop()`` — tear down runtime (VM, container, daemons)
+        4. ``ensure_opencode_server()`` — start/reuse sandboxed OpenCode
+        5. ``build_cli_wrapper()`` — legacy Claude SDK compatibility
+        6. ``stop()`` — tear down runtime (VM, container, daemons)
     """
 
     @property
@@ -159,6 +168,21 @@ class Sandbox(Protocol):
             all temp files (including the wrapper) that should be deleted
             when the session ends.
         """
+        ...
+
+    def ensure_opencode_server(
+        self, *, log_file: Path | None = None,
+    ) -> SandboxOpenCodeServer:
+        """Start or reuse ``opencode serve`` inside the sandbox.
+
+        Returns a host-reachable endpoint. Backends that do not implement
+        sandboxed OpenCode must raise ``NotImplementedError`` rather than
+        falling back to a host OpenCode server.
+        """
+        ...
+
+    def opencode_home_dir(self) -> Path:
+        """Host-side directory mapped to OpenCode's data dir in the sandbox."""
         ...
 
     def stop(self) -> None:
@@ -313,5 +337,4 @@ class Sandbox(Protocol):
     def cleanup_port_forwards(self, scope_key: str | None = None) -> None:
         """Tear down all forwards, or just those owned by *scope_key*."""
         ...
-
 

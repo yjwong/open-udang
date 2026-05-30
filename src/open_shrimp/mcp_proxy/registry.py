@@ -8,15 +8,14 @@ access.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
-
-from telegram import Bot
 
 from open_shrimp.mcp_proxy.config_reader import (
     HttpServerConfig,
     StdioServerConfig,
 )
+from open_shrimp.tools import OpenShrimpTool
 
 
 @dataclass
@@ -38,11 +37,7 @@ class ToolScopeRegistration:
     chat_id: int
     thread_id: int | None
     user_id: int
-    is_private_chat: bool
-    bot: Bot
-    db: Any | None = None
-    config: Any | None = None
-    job_queue: Any | None = None
+    tool_factory: Callable[[], list[OpenShrimpTool]]
 
 
 class ProxyRegistry:
@@ -108,21 +103,13 @@ class ProxyRegistry:
         chat_id: int,
         thread_id: int | None,
         user_id: int,
-        is_private_chat: bool,
-        bot: Bot,
-        db: Any | None = None,
-        config: Any | None = None,
-        job_queue: Any | None = None,
+        tool_factory: Callable[[], list[OpenShrimpTool]],
     ) -> str:
         """Register/reuse a scope-bound OpenShrimp tools endpoint."""
         key = (context_name, chat_id, thread_id, user_id)
         existing = self._tool_scopes_by_key.get(key)
         if existing is not None:
-            existing.bot = bot
-            existing.db = db
-            existing.config = config
-            existing.job_queue = job_queue
-            existing.is_private_chat = is_private_chat
+            existing.tool_factory = tool_factory
             return existing.token
         token = secrets.token_urlsafe(32)
         reg = ToolScopeRegistration(
@@ -131,11 +118,7 @@ class ProxyRegistry:
             chat_id=chat_id,
             thread_id=thread_id,
             user_id=user_id,
-            is_private_chat=is_private_chat,
-            bot=bot,
-            db=db,
-            config=config,
-            job_queue=job_queue,
+            tool_factory=tool_factory,
         )
         self._tool_scopes_by_key[key] = reg
         self._tool_scopes_by_token[token] = reg

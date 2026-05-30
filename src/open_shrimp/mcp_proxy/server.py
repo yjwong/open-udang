@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -41,7 +42,7 @@ from open_shrimp.mcp_proxy.registry import (
     ToolScopeRegistration,
 )
 from open_shrimp.mcp_proxy.stdio_manager import StdioManager
-from open_shrimp.tools import OpenShrimpTool, create_openshrimp_tools
+from open_shrimp.tools import OpenShrimpTool
 
 logger = logging.getLogger(__name__)
 
@@ -264,17 +265,7 @@ async def _handle_tools_rpc(
 
 
 def _tools_for_registration(reg: ToolScopeRegistration) -> list[OpenShrimpTool]:
-    return create_openshrimp_tools(
-        bot=reg.bot,
-        chat_id=reg.chat_id,
-        thread_id=reg.thread_id,
-        db=reg.db,
-        config=reg.config,
-        job_queue=reg.job_queue,
-        context_name=reg.context_name,
-        user_id=reg.user_id,
-        is_private_chat=reg.is_private_chat,
-    )
+    return reg.tool_factory()
 
 
 def _rpc_result(request_id: Any, result: Any) -> dict[str, Any]:
@@ -408,11 +399,7 @@ class McpProxy:
         chat_id: int,
         thread_id: int | None,
         user_id: int,
-        is_private_chat: bool,
-        bot: Any,
-        db: Any | None = None,
-        config: Any | None = None,
-        job_queue: Any | None = None,
+        tool_factory: Callable[[], list[OpenShrimpTool]],
     ) -> str:
         """Register a scope-bound OpenShrimp tools endpoint."""
         return self._registry.register_tool_scope(
@@ -420,11 +407,7 @@ class McpProxy:
             chat_id=chat_id,
             thread_id=thread_id,
             user_id=user_id,
-            is_private_chat=is_private_chat,
-            bot=bot,
-            db=db,
-            config=config,
-            job_queue=job_queue,
+            tool_factory=tool_factory,
         )
 
     async def unregister_context(self, context_name: str) -> None:

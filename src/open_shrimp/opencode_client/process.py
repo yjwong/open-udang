@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from open_shrimp.opencode_client.errors import (
@@ -22,6 +23,15 @@ logger = logging.getLogger("opencode.serve")
 _LISTENING_RE = re.compile(r"listening on (http://\S+)")
 _STARTUP_TIMEOUT = 20.0
 _AUTH_USERNAME = "opencode"
+
+
+@dataclass(frozen=True)
+class OpenCodeEndpoint:
+    """Host-reachable OpenCode server endpoint."""
+
+    base_url: str
+    auth_header: str
+    owner: object | None = None
 
 
 def _find_binary() -> str:

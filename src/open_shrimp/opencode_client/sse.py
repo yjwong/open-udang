@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from open_shrimp.opencode_client.errors import CLIConnectionError
-from open_shrimp.opencode_client.process import OpenCodeServer
+from open_shrimp.opencode_client.process import OpenCodeEndpoint, OpenCodeServer
 
 logger = logging.getLogger("opencode.sse")
 
@@ -83,7 +83,7 @@ class EventBus:
 
     def __init__(
         self,
-        server: OpenCodeServer,
+        server: OpenCodeServer | OpenCodeEndpoint,
         *,
         http_client: httpx.AsyncClient | None = None,
         queue_size: int = _DEFAULT_QUEUE_SIZE,

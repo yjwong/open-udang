@@ -28,11 +28,13 @@ from open_shrimp.opencode_client.options import (
     split_provider_model,
 )
 from open_shrimp.opencode_client.permission import PermissionBridge
+from open_shrimp.opencode_client.process import OpenCodeEndpoint
 from open_shrimp.opencode_client.sessions import SessionInfo, list_sessions
 
 __all__ = [
     "OpenCodeClient",
     "OpenCodeOptions",
+    "OpenCodeEndpoint",
     "AssistantMessage",
     "UserMessage",
     "SystemMessage",

@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from open_shrimp.opencode_client.process import OpenCodeEndpoint
+
 
 def split_provider_model(model: str | None) -> tuple[str, str]:
     """Split a context's ``model`` field into ``(provider, model)``.
@@ -31,6 +33,7 @@ class OpenCodeOptions:
     provider: str
     model: str
     resume: str | None = None
+    endpoint: OpenCodeEndpoint | None = None
 
     # Honoured fields.
     effort: str | None = None  # → variant on prompt_async

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -52,10 +53,9 @@ def create_openshrimp_tools(
     user_id: int = 0,
     is_private_chat: bool = True,
     include_sandbox_tools: bool = False,
+    sandbox: Any | None = None,
 ) -> list[OpenShrimpTool]:
-    """Create OpenShrimp's non-sandbox tool definitions for a chat scope."""
-    if include_sandbox_tools:
-        logger.warning("Sandbox OpenShrimp MCP tools are not implemented yet")
+    """Create OpenShrimp tool definitions for a chat scope."""
 
     thread_kwargs: dict[str, Any] = {}
     if thread_id is not None:
@@ -315,5 +315,88 @@ def create_openshrimp_tools(
                 delete_schedule,
             ),
         ])
+
+    if include_sandbox_tools and sandbox is not None:
+        screenshots_dir = sandbox.get_screenshots_dir()
+        if screenshots_dir is not None:
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+            async def computer_screenshot(args: dict[str, Any]) -> dict[str, Any]:
+                output_path = screenshots_dir / f"screenshot-{int(time.time() * 1000)}.png"
+                try:
+                    sandbox.take_screenshot(output_path)
+                    if not output_path.is_file() or output_path.stat().st_size == 0:
+                        return _text_result("Error: screenshot file was not created.", is_error=True)
+                except Exception as exc:
+                    logger.exception("Computer screenshot failed")
+                    return _text_result(f"Error taking screenshot: {exc}", is_error=True)
+                return _text_result(f"Screenshot saved: {output_path}")
+
+            async def computer_click(args: dict[str, Any]) -> dict[str, Any]:
+                try:
+                    sandbox.send_click(int(args.get("x", 0)), int(args.get("y", 0)), str(args.get("button", "left")))
+                except Exception as exc:
+                    return _text_result(f"Error clicking: {exc}", is_error=True)
+                return _text_result("Click sent.")
+
+            async def computer_type(args: dict[str, Any]) -> dict[str, Any]:
+                try:
+                    sandbox.send_type(str(args.get("text", "")))
+                except Exception as exc:
+                    return _text_result(f"Error typing: {exc}", is_error=True)
+                return _text_result("Text typed.")
+
+            async def computer_key(args: dict[str, Any]) -> dict[str, Any]:
+                key = str(args.get("key", ""))
+                if not key:
+                    return _text_result("Error: key is required.", is_error=True)
+                try:
+                    sandbox.send_key(key)
+                except Exception as exc:
+                    return _text_result(f"Error pressing key: {exc}", is_error=True)
+                return _text_result("Key sent.")
+
+            async def computer_scroll(args: dict[str, Any]) -> dict[str, Any]:
+                try:
+                    sandbox.send_scroll(
+                        int(args.get("x", 0)),
+                        int(args.get("y", 0)),
+                        str(args.get("direction", "down")),
+                        int(args.get("amount", 3)),
+                    )
+                except Exception as exc:
+                    return _text_result(f"Error scrolling: {exc}", is_error=True)
+                return _text_result("Scroll sent.")
+
+            async def computer_toplevel(args: dict[str, Any]) -> dict[str, Any]:
+                name = str(args.get("name", ""))
+                if not name:
+                    return _text_result("Error: name is required.", is_error=True)
+                try:
+                    sandbox.focus_window(name)
+                except Exception as exc:
+                    return _text_result(f"Error focusing window: {exc}", is_error=True)
+                return _text_result("Window focused.")
+
+            tools.extend([
+                OpenShrimpTool(
+                    "computer_screenshot",
+                    "Take a screenshot of the sandbox desktop. Call this before coordinate actions.",
+                    {"type": "object", "properties": {}},
+                    True,
+                    computer_screenshot,
+                ),
+                OpenShrimpTool(
+                    "computer_click",
+                    "Click sandbox desktop coordinates. Take a screenshot first.",
+                    {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "button": {"type": "string", "enum": ["left", "middle", "right"]}}, "required": ["x", "y"]},
+                    False,
+                    computer_click,
+                ),
+                OpenShrimpTool("computer_type", "Type text into the sandbox desktop.", {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}, False, computer_type),
+                OpenShrimpTool("computer_key", "Press a key or combo in the sandbox desktop, for example ctrl+a or enter.", {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}, False, computer_key),
+                OpenShrimpTool("computer_scroll", "Scroll at sandbox desktop coordinates. Take a screenshot first.", {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "direction": {"type": "string", "enum": ["up", "down", "left", "right"]}, "amount": {"type": "integer"}}, "required": ["x", "y", "direction"]}, False, computer_scroll),
+                OpenShrimpTool("computer_toplevel", "Focus a sandbox desktop window by title/name substring.", {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}, False, computer_toplevel),
+            ])
 
     return tools

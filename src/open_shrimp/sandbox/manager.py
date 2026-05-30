@@ -215,6 +215,10 @@ class SandboxManager(Protocol):
         """
         ...
 
+    def opencode_home_dir(self, context_name: str) -> Path:
+        """Host-side directory mapped to OpenCode's data dir in the sandbox."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Docker implementation
@@ -545,6 +549,9 @@ class DockerSandboxManager:
     def claude_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name
 
+    def opencode_home_dir(self, context_name: str) -> Path:
+        return self._state_dir / context_name / "opencode-home"
+
 
 # ---------------------------------------------------------------------------
 # Lima implementation
@@ -761,6 +768,9 @@ class LimaSandboxManager:
 
     def claude_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name / "claude-home"
+
+    def opencode_home_dir(self, context_name: str) -> Path:
+        return self._state_dir / context_name / "opencode-home"
 
 
 # ---------------------------------------------------------------------------
@@ -1097,6 +1107,9 @@ class LibvirtSandboxManager:
 
     def claude_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name / "claude-home"
+
+    def opencode_home_dir(self, context_name: str) -> Path:
+        return self._state_dir / context_name / "opencode-home"
 
 
 # ---------------------------------------------------------------------------
