@@ -620,9 +620,29 @@ def ensure_mounts(
         # to rewrite the unit and run systemctl enable --now (which can
         # hang when multiple callers race on the same mount unit).
         escaped_content = shlex.quote(unit_content)
+        setup_mount_path = textwrap.dedent(f"""\
+            mount_path={shlex.quote(mount_path)}
+            case "$mount_path" in
+              /home/claude/*)
+                rel=${{mount_path#/home/claude/}}
+                cur=/home/claude
+                while [ -n "$rel" ] && [ "$rel" != "$mount_path" ]; do
+                  part=${{rel%%/*}}
+                  cur="$cur/$part"
+                  sudo mkdir -p "$cur"
+                  sudo chown claude:claude "$cur"
+                  [ "$rel" = "$part" ] && break
+                  rel=${{rel#*/}}
+                done
+                ;;
+              *)
+                sudo mkdir -p "$mount_path"
+                sudo chown claude:claude "$mount_path"
+                ;;
+            esac
+        """).strip()
         _ssh_run(
-            f"sudo mkdir -p {shlex.quote(mount_path)} && "
-            f"sudo chown claude:claude {shlex.quote(mount_path)} && "
+            f"{setup_mount_path} && "
             f"printf '%s' {escaped_content} | sudo tee {shlex.quote(unit_file)} > /dev/null && "
             f"sudo systemctl daemon-reload && "
             f"sudo systemctl enable --now {shlex.quote(unit_name)}"
