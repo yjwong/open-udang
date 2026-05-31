@@ -85,3 +85,24 @@ def test_host_bash_is_never_auto_allowed_from_config() -> None:
         and rule["action"] == "allow"
         for rule in rules
     )
+
+
+def test_builtin_task_tool_is_disabled_by_default() -> None:
+    rules = _client()._build_initial_rules()
+
+    assert rules[-1] == {
+        "permission": "task",
+        "pattern": "*",
+        "action": "deny",
+    }
+
+
+def test_builtin_task_tool_deny_overrides_allowed_tools() -> None:
+    rules = _client(["Task", "task"])._build_initial_rules()
+
+    matching = [rule for rule in rules if rule["permission"] == "task"]
+    assert matching[-1] == {
+        "permission": "task",
+        "pattern": "*",
+        "action": "deny",
+    }

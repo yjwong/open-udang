@@ -275,6 +275,10 @@ class OpenCodeClient:
             rules.append({"permission": permission, "pattern": "*", "action": "ask"})
         rules.extend(self._rules_from_allowed_tools(include=_ASK_BY_DEFAULT_MCP_PERMS))
         rules.extend(self._rules_from_add_dirs())
+        # OpenShrimp provides its own Agent-compatible MCP tool. Keep
+        # OpenCode's built-in task tool out of the model-visible tool list so
+        # the two delegation paths do not compete.
+        rules.append({"permission": "task", "pattern": "*", "action": "deny"})
         return rules
 
     def _rules_from_allowed_tools(
