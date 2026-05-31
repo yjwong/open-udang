@@ -207,14 +207,6 @@ class SandboxManager(Protocol):
         """Base directory for per-context sandbox state."""
         ...
 
-    def claude_home_dir(self, context_name: str) -> Path:
-        """Host-side directory mapped to ``~/.claude`` inside the sandbox.
-
-        Used to locate session ``.jsonl`` files without creating a full
-        :class:`Sandbox` instance (e.g. for ``/resume`` session listing).
-        """
-        ...
-
     def opencode_home_dir(self, context_name: str) -> Path:
         """Host-side directory mapped to OpenCode's data dir in the sandbox."""
         ...
@@ -546,9 +538,6 @@ class DockerSandboxManager:
     def state_dir(self) -> Path:
         return self._state_dir
 
-    def claude_home_dir(self, context_name: str) -> Path:
-        return self._state_dir / context_name
-
     def opencode_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name / "opencode-home"
 
@@ -765,9 +754,6 @@ class LimaSandboxManager:
     @property
     def state_dir(self) -> Path:
         return self._state_dir
-
-    def claude_home_dir(self, context_name: str) -> Path:
-        return self._state_dir / context_name / "claude-home"
 
     def opencode_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name / "opencode-home"
@@ -1104,9 +1090,6 @@ class LibvirtSandboxManager:
     @property
     def state_dir(self) -> Path:
         return self._state_dir
-
-    def claude_home_dir(self, context_name: str) -> Path:
-        return self._state_dir / context_name / "claude-home"
 
     def opencode_home_dir(self, context_name: str) -> Path:
         return self._state_dir / context_name / "opencode-home"

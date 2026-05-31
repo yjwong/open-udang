@@ -1,4 +1,4 @@
-"""Sandbox package -- isolated execution environments for the Claude CLI."""
+"""Sandbox package -- isolated execution environments for OpenCode."""
 
 from open_shrimp.sandbox.base import Sandbox
 from open_shrimp.sandbox.manager import (

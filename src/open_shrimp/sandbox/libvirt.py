@@ -1,12 +1,11 @@
-"""Libvirt/QEMU-based sandbox for isolated Claude CLI execution.
+"""Libvirt/QEMU-based sandbox for isolated OpenCode execution.
 
 Provides VM-level isolation via KVM/QEMU, managed through libvirt's
 ``qemu:///session`` (rootless) connection.  The host project directory is
 shared with the VM via virtiofs (preferred) or 9p (fallback).
 
 VMs are **persistent**: one long-lived VM per context, kept warm between
-Claude sessions.  Cold boot is ~13s, so VMs should stay running.  The CLI
-wrapper SSHs into the VM to run the Claude CLI.
+OpenCode sessions.  Cold boot is ~13s, so VMs should stay running.
 
 Implements the :class:`~open_shrimp.sandbox.base.Sandbox` protocol.
 """
@@ -34,7 +33,6 @@ from open_shrimp.sandbox.port_forward import (
 from open_shrimp.config import SandboxConfig
 from open_shrimp.sandbox.libvirt_helpers import (
     _fs_tag_for_dir,
-    build_cli_wrapper as _build_cli_wrapper,
     create_overlay,
     _persistent_dev_name,
     create_persistent_volume,
@@ -166,10 +164,9 @@ class LibvirtSandbox:
             self._screenshots_dir.mkdir(parents=True, exist_ok=True)
 
         # Host-side directories shared into the VM to mirror Docker's
-        # bind-mount approach: task output files and .claude session data
-        # are written to the host so the terminal mini app can read them.
+        # bind-mount approach: task output files and OpenCode state are
+        # written to the host so the terminal and resume views can read them.
         self._tmp_dir = self._sdir / "tmp"
-        self._claude_home_dir = self._sdir / "claude-home"
         self._opencode_home_dir = self._sdir / "opencode-home"
 
         self._port_forwards = PortForwardRegistry()
@@ -271,7 +268,6 @@ class LibvirtSandbox:
 
         # Ensure host-side shared directories exist.
         self._tmp_dir.mkdir(parents=True, exist_ok=True)
-        self._claude_home_dir.mkdir(parents=True, exist_ok=True)
         self._opencode_home_dir.mkdir(parents=True, exist_ok=True)
 
         # Build shared_dirs list for domain XML: (host_dir, socket | None).
@@ -534,18 +530,14 @@ class LibvirtSandbox:
             )
 
     def provision_workspace(self) -> None:
-        """Provision the workspace: ensure Claude CLI is installed in the VM."""
+        """Provision the workspace: ensure OpenCode is installed in the VM."""
         assert self._ssh_port is not None
         ssh_key = self._sdir / "ssh_key"
 
-        from open_shrimp.claude_binary import find_claude_binary
         from open_shrimp.sandbox.docker_helpers import _find_opencode_binary
         from open_shrimp.sandbox.libvirt_helpers import _ssh_common_opts
 
-        binaries = {
-            "claude": find_claude_binary(),
-            "opencode": _find_opencode_binary(),
-        }
+        binaries = {"opencode": _find_opencode_binary()}
         ssh_opts = _ssh_common_opts(ssh_key, self._ssh_port)
         scp_opts = [
             "-i", str(ssh_key),
@@ -585,18 +577,6 @@ class LibvirtSandbox:
                 capture_output=True,
             )
             logger.info("%s CLI installed in VM %s", name, self._dom_name)
-
-    def build_cli_wrapper(self) -> tuple[str, list[str]]:
-        assert self._ssh_port is not None
-        path = _build_cli_wrapper(
-            self._context_name,
-            self._sdir,
-            self._ssh_port,
-            project_dir=self._project_dir,
-            instance_prefix=self._instance_prefix,
-            claude_home_dir=self._claude_home_dir,
-        )
-        return path, [path]
 
     def opencode_home_dir(self) -> Path:
         return self._opencode_home_dir
@@ -985,7 +965,7 @@ class LibvirtSandbox:
 
         ``all_dirs`` is the list of host directories that need virtiofs/9p
         filesystem devices.  ``mount_overrides`` maps host paths that
-        should be mounted at a *different* guest path (tmp and .claude).
+        should be mounted at a *different* guest path (tmp and OpenCode state).
         ``readonly_dirs`` is the subset of ``all_dirs`` that should be
         mounted read-only inside the guest.
         """
@@ -993,11 +973,9 @@ class LibvirtSandbox:
         if self._screenshots_dir is not None:
             all_dirs.append(str(self._screenshots_dir))
         all_dirs.append(str(self._tmp_dir))
-        all_dirs.append(str(self._claude_home_dir))
         all_dirs.append(str(self._opencode_home_dir))
         mount_overrides = {
             str(self._tmp_dir): f"/tmp/claude-{_VM_CLAUDE_UID}",
-            str(self._claude_home_dir): "/home/claude/.claude",
             str(self._opencode_home_dir): "/home/claude/.local/share/opencode",
         }
         readonly_dirs: set[str] = set()

@@ -1,33 +1,25 @@
-"""Docker container support for isolated Claude CLI execution.
+"""Docker container support for isolated OpenCode execution.
 
-When a context has ``containerize: true``, the Claude CLI subprocess runs
-inside a Docker container instead of directly on the host.  This provides
-strong filesystem isolation — the agent can only access the bind-mounted
-project directory and its own session storage.
+When a context is sandboxed, OpenCode runs inside a Docker container instead
+of directly on the host.  This provides strong filesystem isolation — the
+agent can only access the bind-mounted project directory and sandbox state.
 
 Containers are **persistent**: one long-lived container per context name,
 shared across all sessions and threads.  The first invocation starts the
 container with ``docker run -d`` (using ``sleep infinity`` as the keep-alive
-process), and subsequent invocations use ``docker exec -i`` to run the
-Claude CLI inside the already-running container.  This eliminates the 2-5s
-``docker run`` overhead per invocation (and 10-30s for DinD contexts where
-the rootless Docker daemon now stays warm).
+process), and subsequent operations use ``docker exec`` inside the
+already-running container.
 
 Testcontainers Ryuk is used as a crash-safety net: a TCP connection to Ryuk
 acts as a liveness signal for the bot process.  If the bot dies without
 graceful shutdown, Ryuk reaps all labelled containers after a short timeout.
 
-The SDK's ``cli_path`` option is pointed at a wrapper script that does the
-``docker exec`` (with fallback to ``docker run -d`` if the container isn't
-running).  All other SDK machinery (stdin/stdout streaming, canUseTool
-callbacks, MCP) works unchanged.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import shlex
 import shutil
 import stat
 import subprocess
@@ -35,7 +27,6 @@ import tempfile
 from importlib.resources import files as _pkg_files
 from pathlib import Path
 
-from open_shrimp.claude_binary import find_claude_binary
 from open_shrimp.paths import data_dir as _data_dir
 
 logger = logging.getLogger(__name__)
@@ -132,11 +123,9 @@ def ensure_image(
 ) -> None:
     """Ensure the container image exists, building it if necessary.
 
-    When *dockerfile* is ``None`` (the default), builds the base
-    ``openshrimp-claude`` image from the bundled ``Dockerfile.claude``.
-    When a custom *dockerfile* path is provided, builds from that file
-    instead — the Claude CLI binary is still copied into the build
-    context as ``claude`` and available via the ``CLAUDE_CLI`` build arg.
+    When *dockerfile* is ``None`` (the default), builds the base image from
+    the bundled ``Dockerfile.claude``. When a custom *dockerfile* path is
+    provided, builds from that file instead.
 
     Args:
         image_name: Docker image tag to build/check.
@@ -149,8 +138,8 @@ def ensure_image(
             computer-use image.
 
     Raises:
-        RuntimeError: If the Claude CLI binary cannot be found or if
-            the Docker build fails.
+        RuntimeError: If the OpenCode binary cannot be found or if the Docker
+            build fails.
     """
     image_exists = subprocess.run(
         ["docker", "image", "inspect", image_name],
@@ -182,8 +171,8 @@ def ensure_image(
     else:
         logger.info("Container image %s not found, building...", image_name)
 
-    cli_binary = find_claude_binary()
-    logger.info("Using Claude CLI binary: %s", cli_binary)
+    opencode_binary = _find_opencode_binary()
+    logger.info("Using OpenCode binary: %s", opencode_binary)
 
     if dockerfile is not None:
         # Ensure the base image exists before building a custom image
@@ -200,19 +189,15 @@ def ensure_image(
         elif image_name != CONTAINER_IMAGE:
             ensure_image(image_name=CONTAINER_IMAGE, dockerfile=None)
 
-        # Custom Dockerfile: use its parent directory as the build
-        # context, copying the CLI binary in alongside it.
+        # Custom Dockerfile: use its parent directory as the build context,
+        # copying the OpenCode binary in alongside it.
         dockerfile_path = Path(dockerfile).resolve()
         if not dockerfile_path.is_file():
             raise RuntimeError(
                 f"Custom Dockerfile not found: {dockerfile_path}"
             )
         build_dir_path = dockerfile_path.parent
-        # Copy CLI binary into the build context (if not already there).
-        cli_dest = build_dir_path / "claude"
-        if not cli_dest.exists() or not cli_dest.samefile(Path(cli_binary)):
-            shutil.copy2(cli_binary, cli_dest)
-        opencode_binary = _find_opencode_binary()
+        # Copy OpenCode binary into the build context (if not already there).
         opencode_dest = build_dir_path / "opencode"
         if not opencode_dest.exists() or not opencode_dest.samefile(Path(opencode_binary)):
             shutil.copy2(opencode_binary, opencode_dest)
@@ -243,7 +228,6 @@ def ensure_image(
             prefix="openshrimp-build-"
         ) as build_dir:
             build_path = Path(build_dir)
-            shutil.copy2(cli_binary, build_path / "claude")
             shutil.copy2(_find_opencode_binary(), build_path / "opencode")
             (build_path / "Dockerfile").write_text(dockerfile_text, encoding="utf-8")
             _docker_build(
@@ -261,7 +245,7 @@ def ensure_computer_use_image(
 ) -> None:
     """Ensure the computer-use container image exists, building if necessary.
 
-    Builds the base ``openshrimp-claude`` image first (if needed), then
+    Builds the base image first (if needed), then
     layers ``Dockerfile.computer-use`` on top with labwc, wlrctl, grim,
     wayvnc, and Chromium.
     """
@@ -359,7 +343,6 @@ def _docker_build(
         "docker", "build",
         "-t", image_name,
         "-f", dockerfile_name,
-        "--build-arg", "CLAUDE_CLI=claude",
         "--build-arg", "OPENCODE_BIN=opencode",
     ]
     if extra_build_args:
@@ -399,8 +382,7 @@ def _docker_build(
 def _ensure_state_dir(context_name: str) -> Path:
     """Create and return the container state directory for a context.
 
-    This directory is bind-mounted as ``~/.claude`` inside the container,
-    giving each context its own isolated session storage.
+    This directory holds per-context sandbox state.
     """
     state_dir = container_state_dir() / context_name
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -716,14 +698,13 @@ def _build_docker_run_argv(
     # host and sandboxed contexts reach it via this hostname.
     docker_argv.extend(["--add-host", "host.docker.internal:host-gateway"])
 
-    # Mount Claude CLI tmp dir inside the container so background task
+    # Mount task-output tmp dir inside the container so background task
     # outputs are written to the host-visible state directory.
     claude_tmp_dir = state_dir / "tmp"
     claude_tmp_dir.mkdir(exist_ok=True)
     opencode_home = get_opencode_home_dir(context_name)
     docker_argv.extend([
         "-v", f"{project_dir}:{project_dir}",
-        "-v", f"{state_dir}:/home/claude/.claude",
         "-v", f"{opencode_home}:/home/claude/.local/share/opencode",
         "-v", f"{claude_tmp_dir}:/tmp/claude-{uid}",
     ])
@@ -932,132 +913,3 @@ def _wait_for_compositor(container_name: str, timeout: int = 15) -> None:
     )
 
 
-def build_cli_wrapper(
-    context_name: str,
-    project_dir: str,
-    additional_directories: list[str] | None = None,
-    docker_in_docker: bool = False,
-    computer_use: bool = False,
-    image_name: str = CONTAINER_IMAGE,
-) -> str:
-    """Generate a wrapper script that runs the Claude CLI via ``docker exec``.
-
-    The wrapper checks if the persistent container is running and falls
-    back to creating it if needed (crash recovery).  Each CLI invocation
-    uses ``docker exec -i`` into the shared container.
-
-    Args:
-        context_name: Context name (used for container naming).
-        project_dir: Absolute path to the project directory on the host.
-        additional_directories: Optional extra directories to bind-mount.
-        docker_in_docker: When True, the container runs a rootless Docker
-            daemon (started once at container creation, stays warm).
-        image_name: Docker image to use.
-
-    Returns:
-        Absolute path to the generated wrapper script.
-    """
-    container_name = _container_name(context_name)
-    state_dir = _ensure_state_dir(context_name)
-    # Build the docker run argv for the fallback creation path.
-    # This is embedded in the wrapper so it can self-heal if the
-    # container was removed externally.
-    docker_run_argv, _ = _build_docker_run_argv(
-        context_name=context_name,
-        project_dir=project_dir,
-        additional_directories=additional_directories,
-        docker_in_docker=docker_in_docker,
-        computer_use=computer_use,
-        image_name=image_name,
-    )
-    quoted_run_args = " \\\n  ".join(shlex.quote(a) for a in docker_run_argv)
-
-    # For DinD, we need to wait for dockerd after container creation.
-    # The entrypoint creates a Docker context so no DOCKER_HOST is needed.
-    uid = os.getuid()
-    dind_wait = ""
-    if docker_in_docker:
-        dind_wait = (
-            f'\n    # Wait for inner Docker daemon to be ready.\n'
-            f'    for _i in $(seq 1 30); do\n'
-            f'      if docker exec'
-            f' {shlex.quote(container_name)} docker info > /dev/null 2>&1; then\n'
-            f'        break\n'
-            f'      fi\n'
-            f'      sleep 1\n'
-            f'    done\n'
-        )
-
-    compositor_wait = ""
-    computer_use_exec_env = ""
-    if computer_use:
-        wayland_socket = f"/tmp/runtime-{uid}/wayland-0"
-        compositor_wait = (
-            f'\n    # Wait for Wayland compositor to be ready.\n'
-            f'    for _i in $(seq 1 75); do\n'
-            f'      if docker exec {shlex.quote(container_name)}'
-            f' test -S {shlex.quote(wayland_socket)}; then\n'
-            f'        break\n'
-            f'      fi\n'
-            f'      sleep 0.2\n'
-            f'    done\n'
-        )
-        # Pass Wayland env vars so Playwright (and other child processes
-        # spawned by the CLI) can optionally render in the compositor.
-        computer_use_exec_env = (
-            f" -e WAYLAND_DISPLAY=wayland-0"
-            f" -e XDG_RUNTIME_DIR=/tmp/runtime-{uid}"
-        )
-
-    script = (
-        f"#!/bin/bash\n"
-        f"# Auto-generated by OpenShrimp for containerized context "
-        f"'{context_name}'.\n"
-        f"# Do not edit — this file is recreated on each session.\n"
-        f'CONTAINER={shlex.quote(container_name)}\n'
-        f'\n'
-        f'# Ensure the persistent container is running.\n'
-        f'STATE=$(docker inspect --format '
-        f"'{{{{.State.Status}}}}' \"$CONTAINER\" 2>/dev/null)\n"
-        f'if [ "$STATE" != "running" ]; then\n'
-        f'    docker rm -f "$CONTAINER" 2>/dev/null\n'
-        f'    DOCKER_RUN_ARGS=(\n'
-        f'      {quoted_run_args}\n'
-        f'    )\n'
-        f'    "${{DOCKER_RUN_ARGS[@]}}" || {{\n'
-        f'        # Race: another invocation may have started the container.\n'
-        f'        sleep 0.5\n'
-        f'        STATE=$(docker inspect --format '
-        f"'{{{{.State.Status}}}}' \"$CONTAINER\" 2>/dev/null)\n"
-        f'        if [ "$STATE" != "running" ]; then\n'
-        f'            echo "Failed to start container $CONTAINER" >&2\n'
-        f'            exit 1\n'
-        f'        fi\n'
-        f'    }}'
-        f'{dind_wait}'
-        f'{compositor_wait}\n'
-        f'fi\n'
-        f'\n'
-        f'exec docker exec -i \\\n'
-        f'  -e ANTHROPIC_API_KEY{computer_use_exec_env} \\\n'
-        f'  "$CONTAINER" \\\n'
-        f'  /usr/local/bin/claude "$@"\n'
-    )
-
-    fd, wrapper_path = tempfile.mkstemp(
-        prefix=f"openshrimp-docker-{context_name}-",
-        suffix=".sh",
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(script)
-    os.chmod(wrapper_path, stat.S_IRWXU)
-
-    logger.info(
-        "Generated Docker exec wrapper for context '%s'%s: %s",
-        context_name,
-        (" (DinD + computer-use)" if docker_in_docker and computer_use
-         else " (DinD)" if docker_in_docker
-         else " (computer-use)" if computer_use else ""),
-        wrapper_path,
-    )
-    return wrapper_path

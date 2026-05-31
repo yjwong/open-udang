@@ -1,9 +1,8 @@
 """Lima macOS guest helper functions.
 
 macOS-specific equivalents of the Linux-specific functions in
-``lima_helpers.py``.  Handles YAML template generation, provisioning,
-Claude CLI installation, and CLI wrapper script generation for macOS
-guest VMs running under Lima with Apple Virtualization.framework.
+``lima_helpers.py``.  Handles YAML template generation and provisioning for
+macOS guest VMs running under Lima with Apple Virtualization.framework.
 """
 
 from __future__ import annotations
@@ -11,19 +10,14 @@ from __future__ import annotations
 import getpass
 import hashlib
 import logging
-import os
 import shlex
-import shutil
-import stat
 import subprocess
-import tempfile
 import textwrap
 from pathlib import Path
 
 import yaml
 from open_shrimp.config import SandboxConfig
 from open_shrimp.sandbox.lima_helpers import (
-    _lima_state_dir,
     _run_limactl,
 )
 
@@ -130,16 +124,8 @@ def _build_mounts_macos(
     for d in additional_directories or []:
         mounts.append({"location": d, "writable": True})
 
-    # Host-side .claude home (shared into VM).
     # macOS Lima guest user home is /Users/<username>.guest.
     vm_home = f"/Users/{getpass.getuser()}.guest"
-    claude_home = str(sdir / "claude-home")
-    Path(claude_home).mkdir(parents=True, exist_ok=True)
-    mounts.append({
-        "location": claude_home,
-        "mountPoint": f"{vm_home}/.claude",
-        "writable": True,
-    })
 
     # Per-context OpenCode state for the sandbox-owned server.
     # Use the macOS user data location and force XDG_DATA_HOME to its
@@ -334,8 +320,8 @@ def _build_computer_use_provisions_macos() -> list[dict]:
         # Google Chrome.
         brew install --cask google-chrome
 
-        # Claude Code and Playwright MCP.
-        npm install -g @anthropic-ai/claude-code@latest @playwright/mcp
+    # Playwright MCP for structured browser automation.
+    npm install -g @playwright/mcp
     """)
     provisions.append({"mode": "user", "script": user_script})
 
@@ -497,174 +483,11 @@ def lima_config_fingerprint_macos(
 
 
 # ---------------------------------------------------------------------------
-# Claude CLI installation
+# End of macOS Lima helpers
 # ---------------------------------------------------------------------------
 
-
-def ensure_claude_cli_in_vm_macos(
-    limactl: str,
-    inst_name: str,
-    env: dict[str, str] | None = None,
-) -> None:
-    """Ensure the Claude CLI binary is installed inside the macOS VM.
-
-    Since host and guest are both macOS ARM, copies the host binary
-    directly via ``limactl copy`` instead of downloading.
-    """
-    # Check if claude is already available.
-    result = _run_limactl(
-        limactl,
-        ["shell", inst_name, "--", "which", "claude"],
-        check=False,
-        timeout=10,
-    )
-    if result.returncode == 0:
-        logger.info("Claude CLI already installed in macOS VM %s", inst_name)
-        return
-
-    # Find host binary.
-    from open_shrimp.claude_binary import find_claude_binary
-    host_binary = find_claude_binary()
-    logger.info("Copying host Claude CLI (%s) into macOS VM %s...", host_binary, inst_name)
-
-    # Copy into VM via limactl copy.
-    _run_limactl(
-        limactl,
-        ["copy", host_binary, f"{inst_name}:/tmp/claude"],
-        check=True,
-        timeout=60,
-    )
-
-    # Move to /usr/local/bin using sudo -S with piped password.
-    # Can't rely on SUDO_ASKPASS here — it may not exist yet on
-    # first boot (provision scripts haven't run).
-    install_cmd = (
-        'PW=$(cat ~/password) && '
-        'echo "$PW" | sudo -S mkdir -p /usr/local/bin && '
-        'echo "$PW" | sudo -S mv /tmp/claude /usr/local/bin/claude && '
-        'echo "$PW" | sudo -S chmod +x /usr/local/bin/claude'
-    )
-    _run_limactl(
-        limactl,
-        ["shell", inst_name, "--", "bash", "-c", install_cmd],
-        check=True,
-        timeout=30,
-    )
-    logger.info("Claude CLI installed in macOS VM %s", inst_name)
 
 
 # ---------------------------------------------------------------------------
 # CLI wrapper script generation
 # ---------------------------------------------------------------------------
-
-
-def build_cli_wrapper_macos(
-    context_name: str,
-    sdir: Path,
-    limactl_path: str,
-    project_dir: str,
-    inst_name: str,
-    claude_home_dir: Path | None = None,
-) -> str:
-    """Generate a bash wrapper that uses ``limactl shell`` to run Claude CLI
-    inside a macOS guest VM.
-
-    Returns the absolute path to the generated wrapper script.
-    """
-    # Credential copy block — extract from macOS Keychain into host-side
-    # VirtioFS-shared directory so the macOS VM can pick it up.
-    cred_block = ""
-    if claude_home_dir is not None:
-        cred_dest = shlex.quote(str(claude_home_dir / ".credentials.json"))
-        cred_block = textwrap.dedent(f"""\
-            # Extract fresh credentials from macOS Keychain.
-            CRED_JSON=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w 2>/dev/null) || true
-            if [ -n "$CRED_JSON" ]; then
-                printf '%s' "$CRED_JSON" > {cred_dest}
-            fi
-        """)
-
-    # Git identity — read from host and export in the remote shell.
-    git_env_parts: list[str] = []
-    for git_key, env_vars in [
-        ("user.name", ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME")),
-        ("user.email", ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL")),
-    ]:
-        try:
-            value = subprocess.check_output(
-                ["git", "config", "--global", git_key],
-                text=True,
-            ).strip()
-            if value:
-                for env_var in env_vars:
-                    git_env_parts.append(
-                        f"export {env_var}={shlex.quote(value)}"
-                    )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-    # Forward ANTHROPIC_API_KEY only if set in the host environment.
-    api_key_export = ""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        api_key_export = " && export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-
-    git_env_export = ""
-    if git_env_parts:
-        git_env_export = " && " + " && ".join(git_env_parts)
-
-    script = textwrap.dedent(f"""\
-        #!/bin/bash
-        set -euo pipefail
-
-        LIMACTL={shlex.quote(limactl_path)}
-        INSTANCE_NAME={shlex.quote(inst_name)}
-        LIMA_HOME={shlex.quote(str(_lima_state_dir()))}
-        export LIMA_HOME
-
-        # Self-heal: check if instance is running, start if needed.
-        # All pre-flight commands redirect stdin from /dev/null to avoid
-        # consuming the SDK's JSON stream on our stdin.
-        STATUS=$("$LIMACTL" list --json 2>/dev/null </dev/null | \\
-            python3 -c "
-        import json, sys
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                inst = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if inst.get('name') == '$INSTANCE_NAME':
-                print(inst.get('status', ''))
-                break
-        " 2>/dev/null || echo "")
-
-        if [ "$STATUS" != "Running" ]; then
-            "$LIMACTL" start "$INSTANCE_NAME" </dev/null 2>/dev/null || true
-            for i in $(seq 1 60); do
-                "$LIMACTL" shell "$INSTANCE_NAME" -- true </dev/null 2>/dev/null && break
-                sleep 1
-            done
-        fi
-
-    """) + cred_block + textwrap.dedent(f"""\
-
-        # Build remote command with proper shell-escaping.
-        # Source shell profile for full PATH (Homebrew, npm, etc.).
-        REMOTE_CMD="source ~/.zprofile 2>/dev/null || true{api_key_export}{git_env_export} && cd {shlex.quote(project_dir)} && claude"
-        for arg in "$@"; do
-            REMOTE_CMD+=" $(printf '%q' "$arg")"
-        done
-
-        exec "$LIMACTL" shell "$INSTANCE_NAME" -- bash -c "$REMOTE_CMD"
-    """)
-
-    wrapper_path = Path(tempfile.mktemp(
-        prefix=f"openshrimp-lima-macos-{context_name}-",
-        suffix=".sh",
-    ))
-    wrapper_path.write_text(script, encoding="utf-8")
-    wrapper_path.chmod(stat.S_IRWXU)
-    logger.info("Generated macOS Lima CLI wrapper at %s", wrapper_path)
-    return str(wrapper_path)

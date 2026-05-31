@@ -1,14 +1,7 @@
-# Minimal container image for running the Claude Code CLI in isolation.
-#
-# The bundled CLI is a statically-ish linked native binary (only needs
-# glibc/libm/libpthread), so a slim Debian base is sufficient — no
-# Node.js required.
+# Minimal container image for running sandboxed OpenCode in isolation.
 #
 # Build:
-#   docker build -f Dockerfile.claude -t openshrimp-claude:latest \
-#     --build-arg CLAUDE_CLI=/path/to/claude .
-#
-# Or let it auto-detect from an installed claude-agent-sdk:
+#   docker build -f Dockerfile.claude -t openshrimp-claude:latest .
 #   docker build -f Dockerfile.claude -t openshrimp-claude:latest .
 
 FROM debian:trixie-slim
@@ -48,7 +41,7 @@ RUN apt-get update \
 # Create a home directory for the non-root user.
 # The actual uid/gid is set at runtime via --user, but the directory
 # must exist and be writable.
-RUN mkdir -p /home/claude/.claude /home/claude/.local/share/docker \
+RUN mkdir -p /home/claude/.local/share/docker \
         /home/claude/.local/share/opencode \
     && chmod -R 777 /home/claude
 
@@ -59,19 +52,12 @@ RUN touch /etc/subuid /etc/subgid \
     && chmod 666 /etc/subuid /etc/subgid /etc/passwd /etc/group \
     && chmod 777 /var/run
 
-# Copy the Claude CLI binary.
-# Default: the bundled binary from claude-agent-sdk.
-ARG CLAUDE_CLI=.venv/lib/python3.11/site-packages/claude_agent_sdk/_bundled/claude
-COPY ${CLAUDE_CLI} /usr/local/bin/claude
-RUN chmod +x /usr/local/bin/claude
-
 # Copy the OpenCode CLI binary for sandboxed OpenCode server mode.
 ARG OPENCODE_BIN=opencode
 COPY ${OPENCODE_BIN} /usr/local/bin/opencode
 RUN chmod +x /usr/local/bin/opencode
 
 # Verify it runs.
-RUN /usr/local/bin/claude --version || true
 RUN /usr/local/bin/opencode --version || true
 
 ENV HOME=/home/claude

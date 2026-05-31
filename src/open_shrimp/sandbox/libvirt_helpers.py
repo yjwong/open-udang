@@ -1,8 +1,7 @@
 """Libvirt/QEMU helpers for VM-based sandbox isolation.
 
 Provides domain XML generation, SSH key management, virtiofsd lifecycle,
-cloud-init ISO creation, qcow2 overlay management, and the CLI wrapper
-script for SSH-based Claude CLI execution inside KVM virtual machines.
+cloud-init ISO creation, and qcow2 overlay management for KVM virtual machines.
 
 Uses ``qemu:///session`` (rootless libvirt) — no root privileges required
 after initial system package installation.
@@ -279,13 +278,7 @@ def _build_cloud_init_user_data(
     change triggers a VM rebuild.
     """
     # Build write_files entries.
-    write_files = textwrap.dedent("""\
-        write_files:
-          # AcceptEnv for API key forwarding via SSH.
-          - path: /etc/ssh/sshd_config.d/openshrimp.conf
-            content: |
-              AcceptEnv ANTHROPIC_API_KEY
-    """)
+    write_files = "write_files:\n"
 
     if computer_use:
         # Items appended here are already dedented — use exact indentation
@@ -1296,156 +1289,9 @@ def _ssh_common_opts(ssh_key: Path, ssh_port: int) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# CLI wrapper script
+# Port persistence
 # ---------------------------------------------------------------------------
 
-
-def build_cli_wrapper(
-    context_name: str,
-    sdir: Path,
-    ssh_port: int,
-    project_dir: str,
-    instance_prefix: str = _DOMAIN_PREFIX,
-    claude_home_dir: Path | None = None,
-) -> str:
-    """Generate a bash wrapper script that SSHs into the VM to run Claude.
-
-    The wrapper:
-    - Checks if the VM's SSH is reachable
-    - Self-heals by starting the domain if needed
-    - Forwards ``ANTHROPIC_API_KEY`` via ``SendEnv``
-    - Enables SSH agent forwarding for git operations
-    - Copies fresh credentials before each invocation
-
-    Args:
-        context_name: Context name (used for domain name and temp file naming).
-        sdir: State directory for this context.
-        ssh_port: Host port forwarded to guest SSH.
-        project_dir: Host project directory path.  The VM mounts this at
-            the same path, so ``cd`` targets the real host path.
-        instance_prefix: Libvirt domain name prefix.
-        claude_home_dir: Host-side directory shared into the VM as
-            ``/home/claude/.claude``.  When set, credentials are copied
-            directly to this directory (no SCP needed).
-
-    Returns:
-        Absolute path to the generated wrapper script.
-    """
-    dom_name = domain_name(context_name, instance_prefix)
-    ssh_key = sdir / "ssh_key"
-
-    # Detect host-side credentials for copying into VM.
-    claude_dir = Path.home() / ".claude"
-    host_credentials = claude_dir / ".credentials.json"
-
-    # Build the credential-copy block.  When claude_home_dir is set
-    # (virtiofs/9p shared), copy directly on the host — no SCP needed.
-    if claude_home_dir is not None:
-        cred_block = textwrap.dedent(f"""\
-            # Copy fresh credentials via host-side shared directory.
-            HOST_CREDENTIALS={shlex.quote(str(host_credentials))}
-            CLAUDE_HOME_DIR={shlex.quote(str(claude_home_dir))}
-            if [ -f "$HOST_CREDENTIALS" ]; then
-                cp "$HOST_CREDENTIALS" "$CLAUDE_HOME_DIR/.credentials.json" 2>/dev/null || true
-            fi
-        """)
-    else:
-        cred_block = textwrap.dedent(f"""\
-            # Copy fresh credentials if they exist on the host.
-            HOST_CREDENTIALS={shlex.quote(str(host_credentials))}
-            if [ -f "$HOST_CREDENTIALS" ]; then
-                scp -i "$SSH_KEY" -P "$VM_SSH_PORT" \\
-                    -o StrictHostKeyChecking=no \\
-                    -o UserKnownHostsFile=/dev/null \\
-                    -o LogLevel=ERROR \\
-                    "$HOST_CREDENTIALS" \\
-                    "$VM_USER@localhost:/home/claude/.claude/.credentials.json" \\
-                    </dev/null 2>/dev/null || true
-            fi
-        """)
-
-    # Git identity — read from host and export in the remote shell.
-    git_env_parts: list[str] = []
-    for git_key, env_vars in [
-        ("user.name", ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME")),
-        ("user.email", ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL")),
-    ]:
-        try:
-            value = subprocess.check_output(
-                ["git", "config", "--global", git_key],
-                text=True,
-            ).strip()
-            if value:
-                for env_var in env_vars:
-                    git_env_parts.append(
-                        f"export {env_var}={shlex.quote(value)}"
-                    )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-    git_env_export = ""
-    if git_env_parts:
-        git_env_export = " && " + " && ".join(git_env_parts)
-
-    script = textwrap.dedent(f"""\
-        #!/bin/bash
-        set -euo pipefail
-
-        VM_SSH_PORT={ssh_port}
-        SSH_KEY={shlex.quote(str(ssh_key))}
-        VM_USER="claude"
-        DOMAIN_NAME={shlex.quote(dom_name)}
-
-        SSH_OPTS=(
-            -i "$SSH_KEY"
-            -p "$VM_SSH_PORT"
-            -o StrictHostKeyChecking=no
-            -o UserKnownHostsFile=/dev/null
-            -o LogLevel=ERROR
-        )
-
-        # Check if VM is running; restart if needed.
-        # All pre-flight commands must redirect stdin from /dev/null to
-        # avoid consuming the SDK's JSON stream on our stdin.
-        if ! ssh "${{SSH_OPTS[@]}}" -o ConnectTimeout=2 \\
-             "$VM_USER@localhost" true </dev/null 2>/dev/null; then
-            virsh -c qemu:///session start "$DOMAIN_NAME" </dev/null 2>/dev/null || true
-            for i in $(seq 1 30); do
-                ssh "${{SSH_OPTS[@]}}" -o ConnectTimeout=1 \\
-                    "$VM_USER@localhost" true </dev/null 2>/dev/null && break
-                sleep 1
-            done
-        fi
-
-    """) + cred_block + textwrap.dedent(f"""\
-
-        # Forward ANTHROPIC_API_KEY, enable agent forwarding for git, exec Claude CLI.
-        # Build a properly quoted remote command string.  SSH concatenates
-        # remote args into a single string and passes it to ``$SHELL -c``,
-        # so we must shell-escape each argument for the remote shell.
-        # Source /etc/profile so the remote shell picks up the full PATH
-        # (needed for npx / Playwright MCP).  SSH non-login shells get a
-        # minimal PATH that may not include /usr/bin.
-        REMOTE_CMD=". /etc/profile{git_env_export} && cd {shlex.quote(project_dir)} && claude"
-        for arg in "$@"; do
-            REMOTE_CMD+=" $(printf '%q' "$arg")"
-        done
-
-        exec ssh "${{SSH_OPTS[@]}}" \\
-            -o SendEnv=ANTHROPIC_API_KEY \\
-            -o ForwardAgent=yes \\
-            "$VM_USER@localhost" \\
-            -- "$REMOTE_CMD"
-    """)
-
-    wrapper_path = Path(tempfile.mktemp(
-        prefix=f"openshrimp-libvirt-{context_name}-",
-        suffix=".sh",
-    ))
-    wrapper_path.write_text(script, encoding="utf-8")
-    wrapper_path.chmod(stat.S_IRWXU)
-    logger.info("Generated CLI wrapper at %s", wrapper_path)
-    return str(wrapper_path)
 
 
 # ---------------------------------------------------------------------------

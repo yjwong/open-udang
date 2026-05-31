@@ -17,7 +17,6 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from open_shrimp.opencode_client import (
@@ -78,7 +77,6 @@ class AgentSession:
     callback_context: CallbackContext = field(default_factory=CallbackContext)
     sandbox: Sandbox | None = None
     mcp_proxy: Any | None = None
-    wrapper_cleanup_paths: list[str] = field(default_factory=list)
     last_activity: float = field(default_factory=time.monotonic)
 
 
@@ -273,7 +271,6 @@ async def get_or_create_session(
 
     sandbox: Sandbox | None = None
     endpoint: OpenCodeEndpoint | None = None
-    wrapper_cleanup_paths: list[str] = []
     _provider, _model = split_provider_model(context.model)
     if is_containerized:
         assert sandbox_manager is not None, (
@@ -618,7 +615,6 @@ async def get_or_create_session(
         callback_context=callback_context,
         sandbox=sandbox,
         mcp_proxy=mcp_proxy,
-        wrapper_cleanup_paths=wrapper_cleanup_paths,
     )
 
     _active_sessions[scope] = session
@@ -711,13 +707,6 @@ async def close_session(scope: ChatScope) -> None:
         logger.info("Closed client for scope %s", scope)
     except (Exception, TimeoutError):
         logger.debug("Error/timeout closing client for scope %s", scope, exc_info=True)
-    # Clean up per-session temp files (wrapper script, sandbox profile, etc.).
-    # The sandbox itself is shared across sessions and managed by the
-    # SandboxManager.
-    for path in session.wrapper_cleanup_paths:
-        Path(path).unlink(missing_ok=True)
-        logger.debug("Removed temp file %s", path)
-
 
 async def close_all_sessions() -> None:
     """Close all active sessions (for shutdown).

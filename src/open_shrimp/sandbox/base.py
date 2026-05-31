@@ -2,8 +2,7 @@
 
 Defines the :class:`Sandbox` protocol that encapsulates different isolation
 backends (Docker containers, Lima/libvirt VMs, etc.) behind a common lifecycle
-interface.  OpenCode paths use :meth:`Sandbox.ensure_opencode_server`; the
-legacy Claude SDK compatibility path still uses :meth:`Sandbox.build_cli_wrapper`.
+interface.  OpenCode paths use :meth:`Sandbox.ensure_opencode_server`.
 
 Use :meth:`SandboxManager.create_sandbox
 <open_shrimp.sandbox.manager.SandboxManager.create_sandbox>` to instantiate
@@ -75,8 +74,7 @@ class Sandbox(Protocol):
         2. ``ensure_running()`` — start container / check SSH (fast when warm)
         3. ``provision_workspace()`` — sync files into sandbox (idempotent)
         4. ``ensure_opencode_server()`` — start/reuse sandboxed OpenCode
-        5. ``build_cli_wrapper()`` — legacy Claude SDK compatibility
-        6. ``stop()`` — tear down runtime (VM, container, daemons)
+        5. ``stop()`` — tear down runtime (VM, container, daemons)
     """
 
     @property
@@ -143,30 +141,12 @@ class Sandbox(Protocol):
     def provision_workspace(self) -> None:
         """Provision the workspace filesystem inside the sandbox.
 
-        Called after :meth:`ensure_running` and before
-        :meth:`build_cli_wrapper`.  For backends where the workspace is
+        Called after :meth:`ensure_running`.  For backends where the workspace is
         already available (bind mounts, shared filesystems), this is a
         no-op.  VM backends may use this to clone repositories or sync
         files.
 
         Idempotent — safe to call on every session start.
-        """
-        ...
-
-    def build_cli_wrapper(self) -> tuple[str, list[str]]:
-        """Generate a shell script that execs into the sandbox.
-
-        The script must:
-        - Accept Claude CLI args as ``"$@"``
-        - Forward stdin/stdout (interactive, ``-i``)
-        - Forward ``ANTHROPIC_API_KEY``
-        - Self-heal if the runtime died
-
-        Returns:
-            A ``(cli_path, cleanup_paths)`` tuple.  *cli_path* is the
-            absolute path to the wrapper script.  *cleanup_paths* lists
-            all temp files (including the wrapper) that should be deleted
-            when the session ends.
         """
         ...
 

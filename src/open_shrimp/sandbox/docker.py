@@ -1,4 +1,4 @@
-"""Docker-based sandbox for isolated Claude CLI execution.
+"""Docker-based sandbox for isolated OpenCode execution.
 
 Wraps the free functions in :mod:`open_shrimp.sandbox.docker_helpers` into a
 :class:`DockerSandbox` class that implements the :class:`Sandbox` protocol.
@@ -24,7 +24,6 @@ from open_shrimp.sandbox.base import PortForward, SandboxOpenCodeServer, VncQuir
 import open_shrimp.sandbox.docker_helpers as _dh
 
 from open_shrimp.sandbox.docker_helpers import (
-    build_cli_wrapper as _build_cli_wrapper,
     container_name as _container_name_fn,
     ensure_computer_use_image as _ensure_computer_use_image,
     ensure_container_running as _ensure_container_running,
@@ -239,17 +238,6 @@ class DockerSandbox:
     def provision_workspace(self) -> None:
         # Docker uses bind mounts — workspace is already in place.
         pass
-
-    def build_cli_wrapper(self) -> tuple[str, list[str]]:
-        path = _build_cli_wrapper(
-            context_name=self._context_name,
-            project_dir=self._project_dir,
-            additional_directories=self._additional_directories,
-            docker_in_docker=self._docker_in_docker,
-            computer_use=self._computer_use,
-            image_name=self._image_name,
-        )
-        return path, [path]
 
     def opencode_home_dir(self) -> Path:
         return _get_opencode_home_dir(self._context_name)

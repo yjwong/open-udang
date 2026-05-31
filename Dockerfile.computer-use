@@ -1,6 +1,6 @@
 # Container image for computer use (GUI interaction) contexts.
 #
-# Extends the base openshrimp-claude image with a headless Wayland
+# Extends the base sandbox image with a headless Wayland
 # compositor (labwc), input injection (wlrctl), screenshot capture
 # (grim), VNC server (wayvnc), a web browser (Chromium via Playwright),
 # and Playwright MCP for structured browser automation.
@@ -79,7 +79,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 
 # Pre-install Playwright MCP and its Chromium browser so the CLI
 # doesn't need to download anything at runtime.
-RUN npm install -g --cache /tmp/npm-cache @anthropic-ai/claude-code@latest @playwright/mcp \
+RUN npm install -g --cache /tmp/npm-cache @playwright/mcp \
     && npx playwright install --with-deps chromium \
     && rm -rf /tmp/npm-cache \
     && chmod -R 777 /home/claude/.cache \

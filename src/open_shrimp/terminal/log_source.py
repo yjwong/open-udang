@@ -91,12 +91,8 @@ def _resolve_container_symlink(
     exist on the host at that path.  This function translates the
     container/VM path back to the host equivalent.
 
-    Two layouts are supported:
-
-    - **Docker**: *context_dir* IS the ``.claude`` home (bind-mounted as
-      ``/home/claude/.claude``), so the relative path resolves directly.
-    - **Libvirt VM**: *context_dir* contains a ``claude-home/``
-      subdirectory that is shared into the VM as ``/home/claude/.claude``.
+    Legacy Docker sandboxes used *context_dir* as the ``.claude`` home, so
+    the relative path resolves directly.
     """
     try:
         target = os.readlink(symlink)
@@ -110,11 +106,6 @@ def _resolve_container_symlink(
         host_path = context_dir / relative
         if host_path.is_file():
             return host_path
-        # Libvirt VM layout: context_dir / "claude-home" IS .claude
-        host_path = context_dir / "claude-home" / relative
-        if host_path.is_file():
-            return host_path
-
     return None
 
 

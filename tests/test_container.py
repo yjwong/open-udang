@@ -25,8 +25,8 @@ def test_ensure_image_skips_when_image_exists():
 
 def test_ensure_image_builds_when_missing(tmp_path):
     """When the image is missing, ensure_image builds it."""
-    # Create a fake claude binary to be "found"
-    fake_binary = tmp_path / "claude"
+    # Create a fake opencode binary to be "found"
+    fake_binary = tmp_path / "opencode"
     fake_binary.write_bytes(b"#!/bin/sh\necho fake")
     fake_binary.chmod(0o755)
 
@@ -43,7 +43,6 @@ def test_ensure_image_builds_when_missing(tmp_path):
     with (
         patch("open_shrimp.sandbox.docker_helpers.subprocess.run", mock_run),
         patch("open_shrimp.sandbox.docker_helpers.subprocess.Popen", mock_popen),
-        patch("open_shrimp.sandbox.docker_helpers.find_claude_binary", return_value=str(fake_binary)),
         patch("open_shrimp.sandbox.docker_helpers._find_opencode_binary", return_value=str(fake_binary)),
     ):
         ensure_image()
@@ -57,7 +56,7 @@ def test_ensure_image_builds_when_missing(tmp_path):
 
 def test_ensure_image_raises_on_build_failure(tmp_path):
     """When docker build fails, ensure_image raises RuntimeError."""
-    fake_binary = tmp_path / "claude"
+    fake_binary = tmp_path / "opencode"
     fake_binary.write_bytes(b"#!/bin/sh\necho fake")
     fake_binary.chmod(0o755)
 
@@ -76,7 +75,6 @@ def test_ensure_image_raises_on_build_failure(tmp_path):
     with (
         patch("open_shrimp.sandbox.docker_helpers.subprocess.run", mock_run),
         patch("open_shrimp.sandbox.docker_helpers.subprocess.Popen", mock_popen),
-        patch("open_shrimp.sandbox.docker_helpers.find_claude_binary", return_value=str(fake_binary)),
         patch("open_shrimp.sandbox.docker_helpers._find_opencode_binary", return_value=str(fake_binary)),
     ):
         with pytest.raises(RuntimeError, match="Failed to build"):
@@ -99,5 +97,6 @@ def test_docker_run_mounts_opencode_home_and_port(tmp_path, monkeypatch):
 
     joined = "\n".join(argv)
     assert f"{tmp_path}/containers/dev/opencode-home:/home/claude/.local/share/opencode" in joined
+    assert f"{tmp_path}/containers/dev:/home/claude/.claude" not in joined
     assert "-p" in argv
     assert f"127.0.0.1::{OPENCODE_GUEST_PORT}" in argv

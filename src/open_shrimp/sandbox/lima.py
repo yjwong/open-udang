@@ -1,12 +1,11 @@
-"""Lima-based sandbox for isolated Claude CLI execution on macOS.
+"""Lima-based sandbox for isolated OpenCode execution on macOS.
 
 Uses Lima (Apple Virtualization.framework via the VZ driver) for full VM
 isolation.  VirtioFS provides fast filesystem sharing between the host
 and the guest (Linux or macOS).
 
 VMs are **persistent**: one long-lived VM per context, kept warm between
-Claude sessions.  Cold boot is ~30 s, so VMs should stay running.  The
-CLI wrapper uses ``limactl shell`` to exec commands inside the VM.
+OpenCode sessions.  Cold boot is ~30 s, so VMs should stay running.
 
 Implements the :class:`~open_shrimp.sandbox.base.Sandbox` protocol.
 """
@@ -40,8 +39,6 @@ from open_shrimp.sandbox.port_forward import (
 from open_shrimp.sandbox.lima_helpers import (
     _lima_env,
     _log,
-    build_cli_wrapper as _build_cli_wrapper,
-    ensure_claude_cli_in_vm,
     generate_lima_yaml,
     instance_name as _instance_name,
     lima_config_fingerprint,
@@ -130,7 +127,6 @@ class LimaSandbox:
 
         self._sdir = state_dir_for(context_name)
         self._inst_name = _instance_name(context_name, instance_prefix)
-        self._claude_home_dir = self._sdir / "claude-home"
         self._tmp_dir = self._sdir / "tmp"
         self._opencode_home_dir = self._sdir / "opencode-home"
         self._env = _lima_env()  # cached — LIMA_HOME doesn't change
@@ -211,7 +207,6 @@ class LimaSandbox:
         _log(log_file, f"Setting up Lima VM for '{self._context_name}'...")
 
         # Ensure shared directories exist on host.
-        self._claude_home_dir.mkdir(parents=True, exist_ok=True)
         self._tmp_dir.mkdir(parents=True, exist_ok=True)
         self._opencode_home_dir.mkdir(parents=True, exist_ok=True)
 
@@ -327,22 +322,8 @@ class LimaSandbox:
                 self._ensure_ssh_tunnels()
 
     def provision_workspace(self) -> None:
-        """Ensure Claude CLI is installed in the VM."""
-        ensure_claude_cli_in_vm(
-            self._limactl, self._inst_name, guest_os=self._guest_os,
-        )
-
-    def build_cli_wrapper(self) -> tuple[str, list[str]]:
-        path = _build_cli_wrapper(
-            self._context_name,
-            self._sdir,
-            self._limactl,
-            project_dir=self._project_dir,
-            inst_name=self._inst_name,
-            claude_home_dir=self._claude_home_dir,
-            guest_os=self._guest_os,
-        )
-        return path, [path]
+        """Workspace is available through Lima mounts."""
+        pass
 
     def opencode_home_dir(self) -> Path:
         return self._opencode_home_dir

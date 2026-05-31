@@ -862,9 +862,8 @@ async def _list_sessions_for_context(
 ) -> "list[Any]":
     """Return ``SessionInfo`` rows for *ctx*. Sandboxed contexts return ``[]``."""
     if ctx.sandbox is not None and ctx.sandbox.enabled:
-        # TODO(sandbox-resume): read OpenCode's per-sandbox SQLite once
-        # the sandbox backends mount opencode-home alongside the
-        # existing claude-home directory.
+        # TODO(sandbox-resume): read OpenCode's per-sandbox SQLite from the
+        # sandbox backend's opencode-home directory.
         return []
     # OpenCode ignores `offset=`; ask for `offset + limit` rows and
     # slice. We pass a request bound so the wire fetch shrinks with

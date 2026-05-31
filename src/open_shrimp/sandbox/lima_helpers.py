@@ -30,33 +30,6 @@ from open_shrimp.paths import data_dir as _data_dir, get_instance_name as _get_i
 logger = logging.getLogger(__name__)
 
 
-def _read_credentials_json() -> str | None:
-    """Read Claude Code credentials from the macOS Keychain.
-
-    Returns the raw JSON string, or ``None`` if unavailable.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                "Claude Code-credentials",
-                "-a",
-                getpass.getuser(),
-                "-w",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            logger.info("Read credentials from macOS Keychain")
-            return result.stdout.strip()
-    except Exception:
-        logger.debug("Failed to read credentials from macOS Keychain", exc_info=True)
-    return None
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -120,14 +93,6 @@ _CLOUD_IMAGES: dict[str, str] = {
         "ubuntu-24.04-server-cloudimg-amd64.img"
     ),
 }
-
-# Claude CLI binary download (GCS distribution).
-_CLAUDE_CLI_GCS_BASE = (
-    "https://storage.googleapis.com/"
-    "claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/"
-    "claude-code-releases"
-)
-
 
 # ---------------------------------------------------------------------------
 # Lima binary management (following tunnel.py pattern)
@@ -387,18 +352,10 @@ def _build_mounts(
     for d in additional_directories or []:
         mounts.append({"location": d, "writable": True})
 
-    # Host-side .claude home (shared into VM).
     # Lima creates the VM user as <username> with home /home/<username>.guest.
     # getpass.getuser(), not os.getlogin() — the latter returns "root"
     # under launchd (macOS .app), producing a wrong mount point.
     vm_home = f"/home/{getpass.getuser()}.guest"
-    claude_home = str(sdir / "claude-home")
-    Path(claude_home).mkdir(parents=True, exist_ok=True)
-    mounts.append({
-        "location": claude_home,
-        "mountPoint": f"{vm_home}/.claude",
-        "writable": True,
-    })
 
     # Per-context OpenCode state.  OpenCode's built-in tools run inside
     # the VM server process, so its state must be mounted into the guest
@@ -465,10 +422,6 @@ def _build_provision_scripts(
         # Create claude user if not exists.
         id claude &>/dev/null || useradd -m -s /bin/bash -G sudo claude
         echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude
-
-        # AcceptEnv for API key forwarding via SSH.
-        printf 'AcceptEnv ANTHROPIC_API_KEY\\n' > /etc/ssh/sshd_config.d/openshrimp.conf
-        systemctl restart ssh
 
         # Enable fstrim for disk space reclamation.
         systemctl enable --now fstrim.timer
@@ -538,9 +491,8 @@ def _build_computer_use_provisions() -> list[dict]:
 
         rm -rf /var/lib/apt/lists/*
 
-        # Install Claude Code and Playwright MCP globally.
+        # Install Playwright MCP globally.
         npm install -g --cache /tmp/npm-cache \\
-            @anthropic-ai/claude-code@latest \\
             @playwright/mcp
         rm -rf /tmp/npm-cache
 
@@ -875,237 +827,8 @@ def limactl_shell_check(limactl: str, name: str) -> bool:
     return result.returncode == 0
 
 
-# ---------------------------------------------------------------------------
-# Claude CLI binary provisioning for Linux guest
-# ---------------------------------------------------------------------------
-
-
-def _get_host_claude_version() -> str | None:
-    """Get the Claude CLI version from the host binary."""
-    claude = shutil.which("claude")
-    if claude is None:
-        # Try the bundled binary.
-        try:
-            import claude_agent_sdk
-
-            bundled = (
-                Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
-            )
-            if bundled.exists():
-                claude = str(bundled)
-        except (ImportError, AttributeError):
-            pass
-
-    if claude is None:
-        return None
-
-    try:
-        result = subprocess.run(
-            [claude, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            # Output format: "2.1.87 (Claude Code)" or just "2.1.87"
-            version = result.stdout.strip().split()[0]
-            return version
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return None
-
-
-def ensure_claude_cli_in_vm(
-    limactl: str,
-    inst_name: str,
-    *,
-    guest_os: str = "linux",
-) -> None:
-    """Ensure the Claude CLI binary is installed inside the Lima VM.
-
-    For Linux guests, downloads the Linux binary directly inside the VM
-    using the GCS distribution URL.  For macOS guests, copies the host
-    binary directly (same OS and architecture).
-    """
-    if guest_os == "macos":
-        from open_shrimp.sandbox.lima_macos_helpers import ensure_claude_cli_in_vm_macos
-        return ensure_claude_cli_in_vm_macos(limactl, inst_name)
-
-    # Check if claude is already available.
-    result = _run_limactl(
-        limactl,
-        ["shell", inst_name, "--", "which", "claude"],
-        check=False,
-        timeout=10,
-    )
-    if result.returncode == 0:
-        logger.info("Claude CLI already installed in VM %s", inst_name)
-        return
-
-    # Determine version from host.
-    version = _get_host_claude_version()
-    if version is None:
-        raise RuntimeError(
-            "Cannot determine Claude CLI version from host. "
-            "Ensure 'claude' is installed and on your PATH."
-        )
-
-    # Determine guest architecture.
-    arch_result = _run_limactl(
-        limactl,
-        ["shell", inst_name, "--", "uname", "-m"],
-        check=True,
-        timeout=10,
-    )
-    guest_arch = arch_result.stdout.strip()
-    if guest_arch == "aarch64":
-        platform_str = "linux-arm64"
-    elif guest_arch == "x86_64":
-        platform_str = "linux-x64"
-    else:
-        raise RuntimeError(f"Unsupported guest architecture: {guest_arch}")
-
-    download_url = f"{_CLAUDE_CLI_GCS_BASE}/{version}/{platform_str}/claude"
-    logger.info(
-        "Downloading Claude CLI %s (%s) into VM %s...",
-        version, platform_str, inst_name,
-    )
-
-    # Download and install inside the VM.
-    install_cmd = (
-        f"curl -fsSL {shlex.quote(download_url)} -o /tmp/claude "
-        f"&& sudo mv /tmp/claude /usr/local/bin/claude "
-        f"&& sudo chmod +x /usr/local/bin/claude"
-    )
-    _run_limactl(
-        limactl,
-        ["shell", inst_name, "--", "bash", "-c", install_cmd],
-        check=True,
-        timeout=120,
-    )
-    logger.info("Claude CLI %s installed in VM %s", version, inst_name)
 
 
 # ---------------------------------------------------------------------------
 # CLI wrapper script generation
 # ---------------------------------------------------------------------------
-
-
-def build_cli_wrapper(
-    context_name: str,
-    sdir: Path,
-    limactl_path: str,
-    project_dir: str,
-    inst_name: str,
-    claude_home_dir: Path | None = None,
-    *,
-    guest_os: str = "linux",
-) -> str:
-    """Generate a bash wrapper that uses ``limactl shell`` to run Claude CLI.
-
-    Returns the absolute path to the generated wrapper script.
-    """
-    if guest_os == "macos":
-        from open_shrimp.sandbox.lima_macos_helpers import build_cli_wrapper_macos
-        return build_cli_wrapper_macos(
-            context_name, sdir, limactl_path, project_dir,
-            inst_name, claude_home_dir,
-        )
-
-    # Credential copy block — extract from macOS Keychain into host-side
-    # VirtioFS-shared directory so the Linux VM can pick it up.
-    cred_block = ""
-    if claude_home_dir is not None:
-        cred_dest = shlex.quote(str(claude_home_dir / ".credentials.json"))
-        cred_block = textwrap.dedent(f"""\
-            # Extract fresh credentials from macOS Keychain.
-            CRED_JSON=$(security find-generic-password -s "Claude Code-credentials" -a "$(whoami)" -w 2>/dev/null) || true
-            if [ -n "$CRED_JSON" ]; then
-                printf '%s' "$CRED_JSON" > {cred_dest}
-            fi
-        """)
-
-    # Git identity — read from host and export in the remote shell.
-    git_env_parts: list[str] = []
-    for git_key, env_vars in [
-        ("user.name", ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME")),
-        ("user.email", ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL")),
-    ]:
-        try:
-            value = subprocess.check_output(
-                ["git", "config", "--global", git_key],
-                text=True,
-            ).strip()
-            if value:
-                for env_var in env_vars:
-                    git_env_parts.append(
-                        f"export {env_var}={shlex.quote(value)}"
-                    )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-    # Forward ANTHROPIC_API_KEY only if set in the host environment.
-    api_key_export = ""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        api_key_export = " && export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-
-    git_env_export = ""
-    if git_env_parts:
-        git_env_export = " && " + " && ".join(git_env_parts)
-
-    script = textwrap.dedent(f"""\
-        #!/bin/bash
-        set -euo pipefail
-
-        LIMACTL={shlex.quote(limactl_path)}
-        INSTANCE_NAME={shlex.quote(inst_name)}
-        LIMA_HOME={shlex.quote(str(_lima_state_dir()))}
-        export LIMA_HOME
-
-        # Self-heal: check if instance is running, start if needed.
-        # All pre-flight commands redirect stdin from /dev/null to avoid
-        # consuming the SDK's JSON stream on our stdin.
-        STATUS=$("$LIMACTL" list --json 2>/dev/null </dev/null | \
-            python3 -c "
-        import json, sys
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                inst = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if inst.get('name') == '$INSTANCE_NAME':
-                print(inst.get('status', ''))
-                break
-        " 2>/dev/null || echo "")
-
-        if [ "$STATUS" != "Running" ]; then
-            "$LIMACTL" start "$INSTANCE_NAME" </dev/null 2>/dev/null || true
-            for i in $(seq 1 60); do
-                "$LIMACTL" shell "$INSTANCE_NAME" -- true </dev/null 2>/dev/null && break
-                sleep 1
-            done
-        fi
-
-    """) + cred_block + textwrap.dedent(f"""\
-
-        # Build remote command with proper shell-escaping.
-        # Source /etc/profile for full PATH (needed for npx / Playwright MCP).
-        REMOTE_CMD=". /etc/profile{api_key_export}{git_env_export} && cd {shlex.quote(project_dir)} && claude"
-        for arg in "$@"; do
-            REMOTE_CMD+=" $(printf '%q' "$arg")"
-        done
-
-        exec "$LIMACTL" shell "$INSTANCE_NAME" -- bash -c "$REMOTE_CMD"
-    """)
-
-    wrapper_path = Path(tempfile.mktemp(
-        prefix=f"openshrimp-lima-{context_name}-",
-        suffix=".sh",
-    ))
-    wrapper_path.write_text(script, encoding="utf-8")
-    wrapper_path.chmod(stat.S_IRWXU)
-    logger.info("Generated Lima CLI wrapper at %s", wrapper_path)
-    return str(wrapper_path)
