@@ -27,6 +27,7 @@ class MockOpenCode:
         self.delays: dict[str, float] = {}
         # Records POSTs for assertions.
         self.created_sessions: list[dict[str, Any]] = []
+        self.forked_sessions: list[dict[str, Any]] = []
         self.prompts: list[dict[str, Any]] = []
         # Records permission replies for assertions.
         self.permission_replies: list[dict[str, Any]] = []
@@ -62,6 +63,11 @@ class MockOpenCode:
                     "/session/{sid}",
                     self._patch_session,
                     methods=["PATCH"],
+                ),
+                Route(
+                    "/session/{sid}/fork",
+                    self._fork_session,
+                    methods=["POST"],
                 ),
                 Route(
                     "/session/{sid}/prompt_async",
@@ -148,6 +154,24 @@ class MockOpenCode:
         sid = secrets.token_hex(8)
         self.created_sessions.append(
             {"id": sid, "body": data, "params": dict(request.query_params)}
+        )
+        return JSONResponse({"id": sid})
+
+    async def _fork_session(self, request: Request) -> Response:
+        parent_sid = request.path_params["sid"]
+        body = await request.body()
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            data = {}
+        sid = secrets.token_hex(8)
+        self.forked_sessions.append(
+            {
+                "id": sid,
+                "parent_id": parent_sid,
+                "body": data,
+                "params": dict(request.query_params),
+            }
         )
         return JSONResponse({"id": sid})
 

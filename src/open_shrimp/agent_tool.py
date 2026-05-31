@@ -37,9 +37,17 @@ _AUTO_BACKGROUND_MS = 120_000
 class AgentArgs:
     description: str
     prompt: str
-    subagent_type: str
+    subagent_type: str | None
     model: str | None = None
     run_in_background: bool = False
+
+    @property
+    def is_fork(self) -> bool:
+        return self.subagent_type is None
+
+    @property
+    def display_agent(self) -> str:
+        return "fork" if self.is_fork else self.subagent_type or _DEFAULT_AGENT
 
 
 @dataclass(frozen=True)
@@ -75,9 +83,21 @@ def create_agent_tool(ctx: AgentToolContext) -> OpenShrimpTool:
         name="agent",
         description=(
             "Launch a specialized subagent in a child OpenCode session and return "
-            "its final answer. Use this for independent research or focused work. "
-            "If subagent_type is omitted, 'general' is used. Available common "
-            "agent types include 'general' and 'explore'."
+            "its final answer. Use this for independent research, focused work, "
+            "or parallelizable subproblems where the intermediate tool output "
+            "is not worth keeping in the main conversation context. If "
+            "subagent_type is omitted, fork the current conversation so the "
+            "agent inherits context. Specify subagent_type to start a fresh "
+            "specialized agent, commonly 'general' or 'explore'. Do not use "
+            "this for reading one known file, simple directed searches, or tiny "
+            "edits that you can handle directly. If multiple independent "
+            "investigations are needed, launch multiple agents in parallel in "
+            "one response. When writing the prompt, brief the agent with the "
+            "goal, relevant files or commands, what you already know, "
+            "constraints, and expected output format or length. The agent's "
+            "result is returned to you; summarize relevant findings for the "
+            "user. Use run_in_background only for long-running work that can "
+            "proceed independently."
         ),
         input_schema={
             "type": "object",
@@ -88,11 +108,20 @@ def create_agent_tool(ctx: AgentToolContext) -> OpenShrimpTool:
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "The task for the agent to perform",
+                    "description": (
+                        "The task for the agent to perform. Include enough "
+                        "context for the child session: goal, relevant "
+                        "files/commands, constraints, known findings, and "
+                        "desired output."
+                    ),
                 },
                 "subagent_type": {
                     "type": "string",
-                    "description": "The type of specialized agent to use for this task",
+                    "description": (
+                        "The type of specialized agent to use for this task. "
+                        "Omit to fork the current conversation with inherited "
+                        "context."
+                    ),
                 },
                 "model": {
                     "type": "string",
@@ -116,7 +145,12 @@ def create_agent_tool(ctx: AgentToolContext) -> OpenShrimpTool:
 def validate_agent_args(raw_args: dict[str, Any]) -> AgentArgs:
     description = str(raw_args.get("description", "")).strip()
     prompt = str(raw_args.get("prompt", "")).strip()
-    subagent_type = str(raw_args.get("subagent_type", "")).strip() or _DEFAULT_AGENT
+    subagent_raw = raw_args.get("subagent_type")
+    subagent_type = (
+        str(subagent_raw).strip()
+        if subagent_raw is not None and str(subagent_raw).strip()
+        else None
+    )
     model_raw = raw_args.get("model")
     model = str(model_raw).strip() if model_raw is not None else None
     run_in_background = bool(raw_args.get("run_in_background"))
@@ -145,7 +179,7 @@ async def run_agent_foreground(args: AgentArgs, ctx: AgentToolContext) -> str:
         "foreground_launched",
         description=args.description,
         prompt=args.prompt,
-        subagent_type=args.subagent_type,
+        subagent_type=args.display_agent,
         child_session_id=task.child_session_id,
     )
     driver_task = asyncio.create_task(
@@ -199,13 +233,12 @@ async def _run_agent_foreground_inline(args: AgentArgs, ctx: AgentToolContext) -
         prompt_provider, prompt_model = split_provider_model(args.model)
         child_model = {"providerID": prompt_provider, "modelID": prompt_model}
 
-    child_session_id = await client.create_session(
-        directory=ctx.cwd,
-        permission_rules=client.permission_rules,
-        parent_id=parent_session_id,
-        title=f"{args.description} (@{args.subagent_type} subagent)",
-        agent=args.subagent_type,
-        model=child_model,
+    child_session_id = await _create_child_session(
+        client,
+        args,
+        ctx,
+        parent_session_id,
+        child_model,
     )
     queue = client.subscribe_session(child_session_id)
     bridge = client.create_permission_bridge(child_session_id)
@@ -253,7 +286,7 @@ async def launch_agent_background(args: AgentArgs, ctx: AgentToolContext) -> str
         "launched",
         description=args.description,
         prompt=args.prompt,
-        subagent_type=args.subagent_type,
+        subagent_type=args.display_agent,
         child_session_id=task.child_session_id,
     )
     await _send_task_launched_notification(ctx, task)
@@ -286,13 +319,12 @@ async def _create_agent_task(
         prompt_provider, prompt_model = split_provider_model(args.model)
         child_model = {"providerID": prompt_provider, "modelID": prompt_model}
 
-    child_session_id = await client.create_session(
-        directory=ctx.cwd,
-        permission_rules=client.permission_rules,
-        parent_id=parent_session_id,
-        title=f"{args.description} (@{args.subagent_type} subagent)",
-        agent=args.subagent_type,
-        model=child_model,
+    child_session_id = await _create_child_session(
+        client,
+        args,
+        ctx,
+        parent_session_id,
+        child_model,
     )
     task_id = agent_tasks.new_task_id()
     task = agent_tasks.AgentBackgroundTask(
@@ -304,7 +336,7 @@ async def _create_agent_task(
         tool_use_id=None,
         description=args.description,
         prompt=args.prompt,
-        subagent_type=args.subagent_type,
+        subagent_type=args.display_agent,
         started_at=asyncio.get_running_loop().time(),
         output_path=agent_tasks.agent_task_output_path(task_id),
         status="running",
@@ -313,6 +345,25 @@ async def _create_agent_task(
     )
     agent_tasks.register_task(task)
     return task, client, prompt_provider, prompt_model
+
+
+async def _create_child_session(
+    client: OpenCodeClient,
+    args: AgentArgs,
+    ctx: AgentToolContext,
+    parent_session_id: str,
+    child_model: dict[str, Any] | None,
+) -> str:
+    if args.is_fork:
+        return await client.fork_session(parent_session_id)
+    return await client.create_session(
+        directory=ctx.cwd,
+        permission_rules=client.permission_rules,
+        parent_id=parent_session_id,
+        title=f"{args.description} (@{args.display_agent} subagent)",
+        agent=args.subagent_type,
+        model=child_model,
+    )
 
 
 async def _drive_background_agent(

@@ -23,12 +23,26 @@ class FakeBot:
         self.messages.append(kwargs)
 
 
-def test_validate_agent_args_defaults_subagent() -> None:
+def test_validate_agent_args_defaults_to_fork() -> None:
     args = validate_agent_args({"description": "Search repo", "prompt": "Find it"})
 
     assert args.description == "Search repo"
     assert args.prompt == "Find it"
+    assert args.subagent_type is None
+    assert args.is_fork
+
+
+def test_validate_agent_args_explicit_general_agent() -> None:
+    args = validate_agent_args(
+        {
+            "description": "Search repo",
+            "prompt": "Find it",
+            "subagent_type": "general",
+        }
+    )
+
     assert args.subagent_type == "general"
+    assert not args.is_fork
 
 
 def test_validate_agent_args_requires_prompt() -> None:
@@ -69,6 +83,45 @@ async def test_foreground_agent_tool_runs_child_session(
     assert mock_server.created_sessions[-1]["body"]["parentID"]
     assert mock_server.prompts[-1]["session_id"] == child_id
     assert mock_server.prompts[-1]["body"]["agent"] == "explore"
+
+
+@pytest.mark.asyncio
+async def test_foreground_agent_tool_forks_when_subagent_omitted(
+    mock_server: MockOpenCode, wired_server, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENSHRIMP_AGENT_AUTO_BACKGROUND_MS", "0")
+    opts = OpenCodeOptions(cwd="/repo", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        parent_id = client.session_id
+        assert parent_id is not None
+        tool = create_agent_tool(
+            AgentToolContext(client_getter=lambda: client, cwd="/repo")
+        )
+        original_fork_session = client.fork_session
+        child_id = ""
+
+        async def fork_session_spy(session_id: str, **kwargs):
+            nonlocal child_id
+            child_id = await original_fork_session(session_id, **kwargs)
+            mock_server.script(child_id, [text_delta("p1", "fork answer"), session_idle()])
+            return child_id
+
+        client.fork_session = fork_session_spy  # type: ignore[method-assign]
+        result = await tool.handler(
+            {
+                "description": "Research branch",
+                "prompt": "Check status",
+            }
+        )
+
+    assert result["content"][0]["text"] == "fork answer"
+    assert mock_server.forked_sessions[-1]["parent_id"] == parent_id
+    assert all(
+        created["body"].get("parentID") != parent_id
+        for created in mock_server.created_sessions
+    )
+    assert mock_server.prompts[-1]["session_id"] == child_id
+    assert "agent" not in mock_server.prompts[-1]["body"]
 
 
 @pytest.mark.asyncio
@@ -262,6 +315,7 @@ async def test_background_agent_injects_parent_notification_once(
             {
                 "description": "Explore code",
                 "prompt": "Summarize it",
+                "subagent_type": "general",
                 "run_in_background": True,
             }
         )
@@ -331,6 +385,7 @@ async def test_background_agent_waits_to_inject_when_parent_busy(
                 {
                     "description": "Explore code",
                     "prompt": "Summarize it",
+                    "subagent_type": "general",
                     "run_in_background": True,
                 }
             )
@@ -401,6 +456,7 @@ async def test_background_agent_task_stop_aborts_child_session(
             {
                 "description": "Long search",
                 "prompt": "Keep working",
+                "subagent_type": "general",
                 "run_in_background": True,
             }
         )

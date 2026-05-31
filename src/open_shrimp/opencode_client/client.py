@@ -227,6 +227,41 @@ class OpenCodeClient:
             raise ProcessError(f"POST /session returned no id: {payload!r}")
         return sid
 
+    async def fork_session(
+        self,
+        session_id: str,
+        *,
+        message_id: str | None = None,
+    ) -> str:
+        """Fork an OpenCode session, cloning its conversation history."""
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient.fork_session called before connect()")
+        body: dict[str, Any] = {}
+        if message_id:
+            body["messageID"] = message_id
+        try:
+            r = await self._http.post(f"/session/{session_id}/fork", json=body)
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(f"failed to fork session: {exc}") from exc
+        if r.status_code == 401:
+            raise OpenCodeAuthError("opencode serve rejected our credentials")
+        if r.status_code == 404:
+            raise CLIConnectionError(
+                f"fork returned 404 for session {session_id}"
+            )
+        if r.status_code >= 400:
+            raise ProcessError(
+                f"POST /session/{session_id}/fork returned {r.status_code}: "
+                f"{r.text[:300]}"
+            )
+        payload = r.json()
+        sid = payload.get("id")
+        if not sid:
+            raise ProcessError(
+                f"POST /session/{session_id}/fork returned no id: {payload!r}"
+            )
+        return sid
+
     async def _register_mcp_servers(self) -> None:
         """Register dynamic MCP servers with OpenCode before session use."""
         if self._http is None or not self._options.mcp_servers:

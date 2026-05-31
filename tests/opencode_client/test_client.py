@@ -207,6 +207,32 @@ async def test_child_session_helpers(
     assert mock_server.aborted_sessions[-1] == child_id
 
 
+async def test_fork_session_clones_parent(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/parent", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        parent_id = client.session_id
+        assert parent_id is not None
+        fork_id = await client.fork_session(parent_id)
+
+    assert mock_server.forked_sessions[-1]["id"] == fork_id
+    assert mock_server.forked_sessions[-1]["parent_id"] == parent_id
+    assert mock_server.forked_sessions[-1]["body"] == {}
+
+
+async def test_fork_session_accepts_message_id(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/parent", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        parent_id = client.session_id
+        assert parent_id is not None
+        await client.fork_session(parent_id, message_id="msg_123")
+
+    assert mock_server.forked_sessions[-1]["body"] == {"messageID": "msg_123"}
+
+
 async def test_supplied_endpoint_skips_host_singleton(mock_setup, monkeypatch) -> None:
     mock_server, base_url = mock_setup
 
