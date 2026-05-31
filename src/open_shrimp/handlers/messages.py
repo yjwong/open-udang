@@ -24,6 +24,7 @@ from open_shrimp.opencode_client import CLIConnectionError, ProcessError
 from open_shrimp.client_manager import (
     CallbackContext,
     close_session,
+    get_session,
     get_or_create_session,
     receive_events,
     reconnect_session,
@@ -613,6 +614,175 @@ async def _inject_message(
             pass
 
 
+async def _wake_parent_for_agent_notifications(
+    scope: ChatScope,
+    config: Config,
+    db: aiosqlite.Connection,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int = 0,
+    is_private_chat: bool = True,
+) -> None:
+    """Start a parent receive loop for queued background Agent results.
+
+    Background Agent completion can happen while the parent session is idle.
+    In that case injecting the notification alone is not enough: something
+    must also drive ``receive_response()`` so the parent agent can react.
+    """
+    lock = _scope_dispatch_locks.setdefault(scope, asyncio.Lock())
+    async with lock:
+        session = get_session(scope)
+        if session is None:
+            return
+        parent_session_id = session.session_id or session.client.session_id
+        if parent_session_id is None:
+            return
+
+        running = _running_tasks.get(scope)
+        if running is not None and not running.done():
+            await agent_tasks.drain_parent_notifications(
+                parent_session_id,
+                session.client,
+            )
+            return
+
+        task = asyncio.create_task(
+            _run_parent_notification_continuation(
+                scope,
+                parent_session_id,
+                config,
+                db,
+                context,
+                user_id=user_id,
+                is_private_chat=is_private_chat,
+            )
+        )
+        _running_tasks[scope] = task
+
+
+async def _run_parent_notification_continuation(
+    scope: ChatScope,
+    parent_session_id: str,
+    config: Config,
+    db: aiosqlite.Connection,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int = 0,
+    is_private_chat: bool = True,
+) -> None:
+    ctx_name, ctx_config = await _get_context(scope, config, db)
+    draft_state = _DraftState(
+        chat_id=scope.chat_id,
+        thread_id=scope.thread_id,
+        user_id=user_id,
+        is_private_chat=is_private_chat,
+        bot_token=config.telegram.token,
+    )
+    latest_todos: list[dict[str, Any]] = []
+
+    async def on_todo_update(todos: list[dict[str, Any]]) -> None:
+        latest_todos.clear()
+        latest_todos.extend(todos)
+        await _update_pinned_status(
+            context.bot, scope, ctx_name, ctx_config, db,
+            todos=todos if todos else None,
+        )
+
+    try:
+        session = get_session(scope)
+        if session is None:
+            return
+        _injectable_sessions[scope] = session
+        if config.review.public_url:
+            terminal_url: str | None = config.review.public_url.rstrip("/")
+        else:
+            terminal_url = f"https://{config.review.host}:{config.review.port}"
+
+        while True:
+            injected = await agent_tasks.drain_parent_notifications(
+                parent_session_id,
+                session.client,
+            )
+            if injected == 0:
+                break
+
+            result = await stream_response(
+                bot=context.bot,
+                chat_id=scope.chat_id,
+                events=receive_events(session),
+                draft_state=draft_state,
+                allowed_tools=ctx_config.allowed_tools,
+                cwd=ctx_config.directory,
+                on_todo_update=on_todo_update,
+                terminal_base_url=terminal_url,
+                scope=scope,
+            )
+
+            if result.session_id:
+                await set_session_id(db, scope, ctx_name, result.session_id)
+
+            if result.model_usage or result.turn_usage:
+                await _update_pinned_status(
+                    context.bot, scope, ctx_name, ctx_config, db,
+                    model_usage=result.model_usage,
+                    turn_usage=result.turn_usage,
+                    todos=latest_todos if latest_todos else None,
+                )
+    except CLIConnectionError:
+        logger.exception(
+            "Parent notification continuation failed for scope %s", scope,
+        )
+        try:
+            await close_session(scope)
+        except Exception:
+            logger.debug("Failed to close dead session for scope %s", scope)
+    except Exception:
+        logger.exception(
+            "Parent notification continuation failed for scope %s", scope,
+        )
+    finally:
+        await finalize_and_reset(context.bot, draft_state)
+        _injectable_sessions.pop(scope, None)
+        _running_tasks.pop(scope, None)
+        _wake_after_busy_parent_exit(
+            scope,
+            config,
+            db,
+            context,
+            user_id=user_id,
+            is_private_chat=is_private_chat,
+        )
+
+
+def _wake_after_busy_parent_exit(
+    scope: ChatScope,
+    config: Config,
+    db: aiosqlite.Connection,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    user_id: int = 0,
+    is_private_chat: bool = True,
+) -> None:
+    session = get_session(scope)
+    if session is None:
+        return
+    parent_session_id = session.session_id or session.client.session_id
+    if parent_session_id is None:
+        return
+    if not agent_tasks.has_parent_notifications(parent_session_id):
+        return
+    asyncio.create_task(
+        _wake_parent_for_agent_notifications(
+            scope,
+            config,
+            db,
+            context,
+            user_id=user_id,
+            is_private_chat=is_private_chat,
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Agent task
 # ---------------------------------------------------------------------------
@@ -987,6 +1157,14 @@ async def _start_agent_task(
                         "Failed to save session on cleanup for scope %s", scope
                     )
             _running_tasks.pop(scope, None)
+            _wake_after_busy_parent_exit(
+                scope,
+                config,
+                db,
+                context,
+                user_id=user_id,
+                is_private_chat=is_private_chat,
+            )
 
     task = asyncio.create_task(_run())
     _running_tasks[scope] = task

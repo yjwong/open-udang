@@ -31,7 +31,10 @@ from open_shrimp.client_manager import (
 from open_shrimp.config import Config, load_config
 from open_shrimp.sandbox import SandboxManager, create_sandbox_managers
 from open_shrimp.sandbox.manager import destroy_contexts_background
-from open_shrimp.dispatch_registry import register_dispatch
+from open_shrimp.dispatch_registry import (
+    register_dispatch,
+    register_parent_notification_wakeup,
+)
 from open_shrimp.handlers.approval import handle_approval_callback
 from open_shrimp.handlers.commands import (
     add_dir_handler,
@@ -232,7 +235,10 @@ async def run_bot(
     # components) can send prompts to the agent without needing a direct
     # reference to the bot Application.
     from open_shrimp.db import ChatScope
-    from open_shrimp.handlers.messages import _dispatch_to_agent
+    from open_shrimp.handlers.messages import (
+        _dispatch_to_agent,
+        _wake_parent_for_agent_notifications,
+    )
 
     async def _dispatch(prompt: str, scope: ChatScope, placeholder: str | None = None) -> None:
         # Build a minimal ContextTypes-compatible object.  _dispatch_to_agent
@@ -243,7 +249,22 @@ async def run_bot(
             placeholder=placeholder,
         )
 
+    async def _wake_parent(
+        scope: ChatScope,
+        user_id: int = 0,
+        is_private_chat: bool = True,
+    ) -> None:
+        await _wake_parent_for_agent_notifications(
+            scope,
+            app.bot_data["config"],
+            db,
+            app,
+            user_id=user_id,
+            is_private_chat=is_private_chat,
+        )
+
     register_dispatch(_dispatch)
+    register_parent_notification_wakeup(_wake_parent)
 
     common_commands = [
         BotCommand("context", "List or switch contexts"),

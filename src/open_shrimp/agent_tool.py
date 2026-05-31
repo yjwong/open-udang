@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,6 +61,7 @@ class AgentToolContext:
     user_id: int = 0
     bot_token: str | None = None
     is_private_chat: bool = True
+    on_parent_notification_ready: Callable[[ChatScope], Awaitable[None]] | None = None
 
 
 def create_agent_tool(ctx: AgentToolContext) -> OpenShrimpTool:
@@ -455,7 +456,9 @@ async def _drive_background_agent(
             await _send_task_notification(ctx, task, status)
             payload = agent_tasks.build_task_notification_payload(task)
             agent_tasks.enqueue_parent_notification(task, payload)
-            if not agent_tasks.parent_session_busy(task.scope):
+            if ctx.on_parent_notification_ready is not None:
+                await ctx.on_parent_notification_ready(task.scope)
+            else:
                 await agent_tasks.drain_parent_notifications(
                     task.parent_session_id, client,
                 )

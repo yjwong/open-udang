@@ -344,7 +344,76 @@ async def test_background_agent_injects_parent_notification_once(
 
 
 @pytest.mark.asyncio
-async def test_background_agent_waits_to_inject_when_parent_busy(
+async def test_background_agent_wakes_idle_parent_notification_runner(
+    mock_server: MockOpenCode, wired_server, tmp_path, monkeypatch
+) -> None:
+    _active_bg_tasks.clear()
+    _running_tasks.clear()
+    monkeypatch.setattr(
+        agent_tasks,
+        "agent_task_output_path",
+        lambda task_id: tmp_path / f"{task_id}.jsonl",
+    )
+    scope = ChatScope(chat_id=987, thread_id=None)
+    bot = FakeBot()
+    opts = OpenCodeOptions(cwd="/repo", provider="openai", model="gpt-test")
+
+    async with OpenCodeClient(opts) as client:
+        parent_session_id = client.session_id
+        assert parent_session_id is not None
+        wake_scopes: list[ChatScope] = []
+
+        async def wake_parent(notification_scope: ChatScope) -> None:
+            wake_scopes.append(notification_scope)
+            await agent_tasks.drain_parent_notifications(parent_session_id, client)
+
+        tool = create_agent_tool(
+            AgentToolContext(
+                client_getter=lambda: client,
+                cwd="/repo",
+                bot=bot,  # type: ignore[arg-type]
+                scope=scope,
+                context_name="default",
+                on_parent_notification_ready=wake_parent,
+            )
+        )
+        original_create_session = client.create_session
+
+        async def create_session_spy(**kwargs):
+            child_id = await original_create_session(**kwargs)
+            mock_server.script(child_id, [text_delta("p1", "done"), session_idle()])
+            return child_id
+
+        client.create_session = create_session_spy  # type: ignore[method-assign]
+        result = await tool.handler(
+            {
+                "description": "Explore code",
+                "prompt": "Summarize it",
+                "subagent_type": "general",
+                "run_in_background": True,
+            }
+        )
+        task_id = result["content"][0]["text"].split("agentId: ", 1)[1].splitlines()[0]
+        for _ in range(100):
+            task = agent_tasks.get_task(task_id)
+            if task is not None and task.injected:
+                break
+            await asyncio.sleep(0.01)
+
+        assert wake_scopes == [scope]
+        parent_prompts = [
+            prompt for prompt in mock_server.prompts
+            if prompt["session_id"] == parent_session_id
+        ]
+        assert len(parent_prompts) == 1
+        assert (
+            f"<task-id>{task_id}</task-id>"
+            in parent_prompts[0]["body"]["parts"][0]["text"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_background_agent_injects_when_parent_busy(
     mock_server: MockOpenCode, wired_server, tmp_path, monkeypatch
 ) -> None:
     _active_bg_tasks.clear()
@@ -400,7 +469,11 @@ async def test_background_agent_waits_to_inject_when_parent_busy(
                 prompt for prompt in mock_server.prompts
                 if prompt["session_id"] == parent_session_id
             ]
-            assert parent_prompts == []
+            assert len(parent_prompts) == 1
+            assert (
+                "<task-notification>"
+                in parent_prompts[0]["body"]["parts"][0]["text"]
+            )
 
             busy_task.cancel()
             _running_tasks.pop(scope, None)

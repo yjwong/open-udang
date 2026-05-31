@@ -159,6 +159,11 @@ def enqueue_parent_notification(task: AgentBackgroundTask, payload: str) -> None
         queue.append((task.task_id, payload))
 
 
+def has_parent_notifications(parent_session_id: str) -> bool:
+    queue = _pending_notifications.get(parent_session_id)
+    return bool(queue)
+
+
 async def drain_parent_notifications(
     parent_session_id: str,
     client: ParentPromptClient,

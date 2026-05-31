@@ -645,6 +645,10 @@ async def get_or_create_session(
                 include_host_bash=include_host_bash,
                 context_directory=context.directory,
             )
+            from open_shrimp.dispatch_registry import (
+                wake_parent_for_agent_notification,
+            )
+
             tools.append(
                 create_agent_tool(
                     AgentToolContext(
@@ -659,6 +663,13 @@ async def get_or_create_session(
                             config.telegram.token if config is not None else None
                         ),
                         is_private_chat=is_private_chat,
+                        on_parent_notification_ready=(
+                            lambda notification_scope: wake_parent_for_agent_notification(
+                                notification_scope,
+                                user_id=user_id,
+                                is_private_chat=is_private_chat,
+                            )
+                        ),
                     )
                 )
             )
