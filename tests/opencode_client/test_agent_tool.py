@@ -154,6 +154,76 @@ async def test_background_agent_tool_registers_and_notifies(
 
 
 @pytest.mark.asyncio
+async def test_foreground_agent_auto_backgrounds_after_timeout(
+    mock_server: MockOpenCode, wired_server, tmp_path, monkeypatch
+) -> None:
+    _active_bg_tasks.clear()
+    _running_tasks.clear()
+    monkeypatch.setenv("OPENSHRIMP_AGENT_AUTO_BACKGROUND_MS", "20")
+    monkeypatch.setattr(
+        agent_tasks,
+        "agent_task_output_path",
+        lambda task_id: tmp_path / f"{task_id}.jsonl",
+    )
+    scope = ChatScope(chat_id=456, thread_id=None)
+    bot = FakeBot()
+    opts = OpenCodeOptions(cwd="/repo", provider="openai", model="gpt-test")
+
+    async with OpenCodeClient(opts) as client:
+        tool = create_agent_tool(
+            AgentToolContext(
+                client_getter=lambda: client,
+                cwd="/repo",
+                bot=bot,  # type: ignore[arg-type]
+                scope=scope,
+                context_name="default",
+                terminal_base_url="https://example.test",
+                user_id=999,
+                bot_token="123:abc",
+                is_private_chat=True,
+            )
+        )
+        original_create_session = client.create_session
+
+        async def create_session_spy(**kwargs):
+            child_id = await original_create_session(**kwargs)
+            mock_server.delays[child_id] = 0.1
+            mock_server.script(
+                child_id, [text_delta("p1", "late answer"), session_idle()],
+            )
+            return child_id
+
+        client.create_session = create_session_spy  # type: ignore[method-assign]
+        result = await tool.handler(
+            {
+                "description": "Long explore",
+                "prompt": "Keep working",
+                "subagent_type": "explore",
+            }
+        )
+        text = result["content"][0]["text"]
+        task_id = text.split("agentId: ", 1)[1].splitlines()[0]
+
+        assert "Async agent launched successfully" in text
+        assert task_id in _active_bg_tasks[scope]
+        assert agent_tasks.get_task(task_id).is_backgrounded  # type: ignore[union-attr]
+        assert bot.messages
+        assert str(bot.messages[-1]["text"]).startswith("⏳ Long explore")
+
+        for _ in range(100):
+            task = agent_tasks.get_task(task_id)
+            if task is not None and task.status == "completed" and task.injected:
+                break
+            await asyncio.sleep(0.01)
+
+    task = agent_tasks.get_task(task_id)
+    assert task is not None
+    assert task.final_text == "late answer"
+    assert task_id not in _active_bg_tasks.get(scope, {})
+    assert any("Agent task completed" in str(msg["text"]) for msg in bot.messages)
+
+
+@pytest.mark.asyncio
 async def test_background_agent_injects_parent_notification_once(
     mock_server: MockOpenCode, wired_server, tmp_path, monkeypatch
 ) -> None:

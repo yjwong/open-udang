@@ -44,6 +44,7 @@ class AgentBackgroundTask:
     error: str | None = None
     notified: bool = False
     injected: bool = False
+    is_backgrounded: bool = True
 
 
 class ParentPromptClient(Protocol):

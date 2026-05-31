@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,7 @@ from open_shrimp.web_app_button import make_web_app_button
 logger = logging.getLogger(__name__)
 
 _DEFAULT_AGENT = "general"
+_AUTO_BACKGROUND_MS = 120_000
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,57 @@ def validate_agent_args(raw_args: dict[str, Any]) -> AgentArgs:
 
 
 async def run_agent_foreground(args: AgentArgs, ctx: AgentToolContext) -> str:
+    if ctx.scope is None or _foreground_auto_background_ms() <= 0:
+        return await _run_agent_foreground_inline(args, ctx)
+
+    task, client, prompt_provider, prompt_model = await _create_agent_task(
+        args, ctx, is_backgrounded=False,
+    )
+    await agent_tasks.append_transcript(
+        task,
+        "foreground_launched",
+        description=args.description,
+        prompt=args.prompt,
+        subagent_type=args.subagent_type,
+        child_session_id=task.child_session_id,
+    )
+    driver_task = asyncio.create_task(
+        _drive_background_agent(task, args, ctx, client, prompt_provider, prompt_model)
+    )
+    agent_tasks.set_asyncio_task(task.task_id, driver_task)
+    timeout = _foreground_auto_background_ms() / 1000
+    try:
+        await asyncio.wait_for(asyncio.shield(driver_task), timeout=timeout)
+    except TimeoutError:
+        if not driver_task.done() and task.status == "running":
+            task.is_backgrounded = True
+            await agent_tasks.append_transcript(task, "backgrounded", reason="timeout")
+            await _send_task_launched_notification(ctx, task)
+            return _async_launched_text(task.task_id)
+        await driver_task
+    except asyncio.CancelledError:
+        if not task.is_backgrounded and not driver_task.done():
+            task.status = "killed"
+            task.error = "stopped"
+            try:
+                await task.abort()
+            finally:
+                driver_task.cancel()
+        raise
+
+    if task.status == "failed":
+        if task.final_text:
+            return (
+                f"{task.final_text}\n\nAgent completed with errors: "
+                f"{task.error or 'unknown error'}"
+            )
+        return f"Agent completed with errors: {task.error or 'unknown error'}"
+    if task.status == "killed":
+        return task.final_text or "Agent task was stopped."
+    return task.final_text or "Agent completed without a text response."
+
+
+async def _run_agent_foreground_inline(args: AgentArgs, ctx: AgentToolContext) -> str:
     client = ctx.client_getter()
     if client is None:
         raise ProcessError("parent OpenCode client is not available")
@@ -192,6 +245,31 @@ async def run_agent_foreground(args: AgentArgs, ctx: AgentToolContext) -> str:
 
 
 async def launch_agent_background(args: AgentArgs, ctx: AgentToolContext) -> str:
+    task, client, prompt_provider, prompt_model = await _create_agent_task(
+        args, ctx, is_backgrounded=True,
+    )
+    await agent_tasks.append_transcript(
+        task,
+        "launched",
+        description=args.description,
+        prompt=args.prompt,
+        subagent_type=args.subagent_type,
+        child_session_id=task.child_session_id,
+    )
+    await _send_task_launched_notification(ctx, task)
+    bg_task = asyncio.create_task(
+        _drive_background_agent(task, args, ctx, client, prompt_provider, prompt_model)
+    )
+    agent_tasks.set_asyncio_task(task.task_id, bg_task)
+    return _async_launched_text(task.task_id)
+
+
+async def _create_agent_task(
+    args: AgentArgs,
+    ctx: AgentToolContext,
+    *,
+    is_backgrounded: bool,
+) -> tuple[agent_tasks.AgentBackgroundTask, OpenCodeClient, str | None, str | None]:
     client = ctx.client_getter()
     if client is None:
         raise ProcessError("parent OpenCode client is not available")
@@ -231,29 +309,10 @@ async def launch_agent_background(args: AgentArgs, ctx: AgentToolContext) -> str
         output_path=agent_tasks.agent_task_output_path(task_id),
         status="running",
         abort=lambda: client.abort_session(child_session_id),
+        is_backgrounded=is_backgrounded,
     )
     agent_tasks.register_task(task)
-    await agent_tasks.append_transcript(
-        task,
-        "launched",
-        description=args.description,
-        prompt=args.prompt,
-        subagent_type=args.subagent_type,
-        child_session_id=child_session_id,
-    )
-    await _send_task_launched_notification(ctx, task)
-    bg_task = asyncio.create_task(
-        _drive_background_agent(task, args, ctx, client, prompt_provider, prompt_model)
-    )
-    agent_tasks.set_asyncio_task(task_id, bg_task)
-    return (
-        "Async agent launched successfully.\n"
-        f"agentId: {task_id}\n"
-        "The agent is working in the background. You will be notified "
-        "automatically when it completes.\n"
-        "Do not duplicate this agent's work. Continue only with "
-        "non-overlapping work, or stop if there is nothing else useful to do."
-    )
+    return task, client, prompt_provider, prompt_model
 
 
 async def _drive_background_agent(
@@ -341,13 +400,14 @@ async def _drive_background_agent(
             total_tokens=task.total_tokens,
             tool_uses=task.tool_uses,
         )
-        await _send_task_notification(ctx, task, status)
-        payload = agent_tasks.build_task_notification_payload(task)
-        agent_tasks.enqueue_parent_notification(task, payload)
-        if not agent_tasks.parent_session_busy(task.scope):
-            await agent_tasks.drain_parent_notifications(
-                task.parent_session_id, client,
-            )
+        if task.is_backgrounded:
+            await _send_task_notification(ctx, task, status)
+            payload = agent_tasks.build_task_notification_payload(task)
+            agent_tasks.enqueue_parent_notification(task, payload)
+            if not agent_tasks.parent_session_busy(task.scope):
+                await agent_tasks.drain_parent_notifications(
+                    task.parent_session_id, client,
+                )
 
 
 async def _send_task_notification(
@@ -449,6 +509,40 @@ def _task_output_keyboard(
 def _telegram_task_text(text: str) -> str:
     chunks = gfm_to_telegram(text)
     return chunks[0] if chunks else text
+
+
+def _async_launched_text(task_id: str) -> str:
+    return (
+        "Async agent launched successfully.\n"
+        f"agentId: {task_id}\n"
+        "The agent is working in the background. You will be notified "
+        "automatically when it completes.\n"
+        "Do not duplicate this agent's work. Continue only with "
+        "non-overlapping work, or stop if there is nothing else useful to do."
+    )
+
+
+def _foreground_auto_background_ms() -> int:
+    if _env_truthy(os.environ.get("OPENSHRIMP_DISABLE_BACKGROUND_TASKS")):
+        return 0
+    override = os.environ.get("OPENSHRIMP_AGENT_AUTO_BACKGROUND_MS")
+    if override is not None:
+        try:
+            return max(0, int(override))
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid OPENSHRIMP_AGENT_AUTO_BACKGROUND_MS=%r", override,
+            )
+            return 0
+    if _env_truthy(os.environ.get("OPENSHRIMP_AGENT_AUTO_BACKGROUND_TASKS")):
+        return _AUTO_BACKGROUND_MS
+    return 0
+
+
+def _env_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def _total_tokens(usage: dict[str, Any] | None) -> int:
