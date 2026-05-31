@@ -650,6 +650,9 @@ async def get_or_create_session(
                     AgentToolContext(
                         client_getter=lambda: client_holder.get("client"),
                         cwd=context.directory,
+                        bot=bot,
+                        scope=scope,
+                        context_name=context_name,
                     )
                 )
             )
@@ -977,6 +980,11 @@ def get_session(scope: ChatScope) -> AgentSession | None:
 
 async def stop_background_task(scope: ChatScope, task_id: str) -> bool:
     """Send a stop signal for a background task.  Returns True on success."""
+    from open_shrimp.agent_tasks import stop_task as stop_agent_task
+
+    if await stop_agent_task(scope, task_id):
+        return True
+
     session = _active_sessions.get(scope)
     if session is None:
         logger.warning("No active session for scope %s to stop task %s", scope, task_id)
