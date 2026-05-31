@@ -262,6 +262,21 @@ class OpenCodeClient:
             )
         return sid
 
+    async def delete_session(self, session_id: str) -> None:
+        """Delete an arbitrary OpenCode session."""
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient.delete_session called before connect()")
+        try:
+            r = await self._http.delete(f"/session/{session_id}")
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(f"DELETE /session/{session_id} failed: {exc}") from exc
+        if r.status_code in (404, 410):
+            return
+        if r.status_code >= 400:
+            raise ProcessError(
+                f"DELETE /session/{session_id} returned {r.status_code}: {r.text[:300]}"
+            )
+
     async def _register_mcp_servers(self) -> None:
         """Register dynamic MCP servers with OpenCode before session use."""
         if self._http is None or not self._options.mcp_servers:
@@ -441,6 +456,116 @@ class OpenCodeClient:
                 f"prompt_async returned {r.status_code}: {r.text[:300]}"
             )
 
+    async def patch_session_permissions(
+        self,
+        session_id: str,
+        rules: list[dict[str, Any]],
+    ) -> None:
+        """Replace permission rules for an arbitrary session."""
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient.patch_session_permissions called before connect()")
+        try:
+            r = await self._http.patch(
+                f"/session/{session_id}",
+                json={"permission": rules},
+            )
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(
+                f"PATCH /session/{session_id} failed: {exc}"
+            ) from exc
+        if r.status_code == 404:
+            raise CLIConnectionError(f"PATCH /session/{session_id} returned 404")
+        if r.status_code >= 400:
+            raise ProcessError(
+                f"PATCH /session/{session_id} returned {r.status_code}: {r.text[:300]}"
+            )
+
+    async def count_assistant_turns(self, session_id: str) -> int | None:
+        """Return assistant message count for a session, if OpenCode exposes it."""
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient.count_assistant_turns called before connect()")
+        try:
+            r = await self._http.get(f"/session/{session_id}/message")
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(
+                f"GET /session/{session_id}/message failed: {exc}"
+            ) from exc
+        if r.status_code == 404:
+            return None
+        if r.status_code >= 400:
+            raise ProcessError(
+                f"GET /session/{session_id}/message returned {r.status_code}: {r.text[:300]}"
+            )
+        payload = r.json()
+        rows = payload.get("messages") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            return None
+        return _count_assistant_message_rows(rows)
+
+    async def collect_next_assistant_text(
+        self,
+        session_id: str,
+        queue: EventQueue,
+        *,
+        timeout: float,
+    ) -> str | None:
+        """Collect assistant text from an arbitrary session response."""
+        async def _collect() -> str | None:
+            chunks: list[str] = []
+            async for msg in self.iter_session_response(session_id, queue, bridge=None):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock) and block.text:
+                            chunks.append(block.text)
+                elif isinstance(msg, ResultMessage):
+                    break
+            text = "".join(chunks).strip()
+            return text or None
+
+        try:
+            return await asyncio.wait_for(_collect(), timeout=timeout)
+        except TimeoutError:
+            logger.debug("Timed out collecting prompt suggestion for %s", session_id)
+            return None
+
+    async def generate_prompt_suggestion(
+        self,
+        *,
+        prompt: str,
+        timeout: float = 30.0,
+    ) -> str | None:
+        """Generate a next-prompt suggestion in a deny-all fork."""
+        if self._session_id is None:
+            return None
+        fork_id = await self.fork_session(self._session_id)
+        queue = self.subscribe_session(fork_id)
+        rules = _deny_all_permission_rules()
+        try:
+            await self.patch_session_permissions(fork_id, rules)
+            await self.prompt_session(
+                fork_id,
+                parts=[{"type": "text", "text": prompt}],
+                provider=self._options.provider,
+                model=self._options.model,
+                variant=self._options.effort,
+                system=self._options.system_prompt,
+            )
+            return await self.collect_next_assistant_text(
+                fork_id,
+                queue,
+                timeout=timeout,
+            )
+        finally:
+            self.unsubscribe_session(fork_id)
+            try:
+                await self.abort_session(fork_id)
+            except Exception:
+                logger.debug("Failed to abort prompt suggestion fork %s", fork_id, exc_info=True)
+            try:
+                await self.delete_session(fork_id)
+            except Exception:
+                logger.debug("Failed to delete prompt suggestion fork %s", fork_id, exc_info=True)
+
     async def stop_task(self, task_id: str) -> None:
         """Best-effort background-task stop.
 
@@ -521,31 +646,15 @@ class OpenCodeClient:
         rebuilt ruleset to ``PATCH /session/{id}``.
         """
         self._permission_rules = list(rules)
-        await self._patch_permission_rules(rules)
+        if self._session_id is not None:
+            await self.patch_session_permissions(self._session_id, rules)
 
     async def _patch_permission_rules(
         self, rules: list[dict[str, Any]],
     ) -> None:
         if self._http is None or self._session_id is None:
             return
-        try:
-            r = await self._http.patch(
-                f"/session/{self._session_id}",
-                json={"permission": rules},
-            )
-        except httpx.HTTPError as exc:
-            raise CLIConnectionError(
-                f"PATCH /session/{self._session_id} failed: {exc}"
-            ) from exc
-        if r.status_code == 404:
-            raise CLIConnectionError(
-                f"PATCH /session/{self._session_id} returned 404"
-            )
-        if r.status_code >= 400:
-            raise ProcessError(
-                f"PATCH /session/{self._session_id} returned "
-                f"{r.status_code}: {r.text[:300]}"
-            )
+        await self.patch_session_permissions(self._session_id, rules)
 
     @property
     def permission_rules(self) -> list[dict[str, Any]]:
@@ -593,6 +702,32 @@ def _parse_allowed_tool(entry: str) -> tuple[str | None, str | None]:
         return text, pattern
     lowered = text.lower()
     return lowered, pattern
+
+
+def _deny_all_permission_rules() -> list[dict[str, Any]]:
+    rules = [{"permission": "*", "pattern": "*", "action": "deny"}]
+    for category in OPENCODE_PERMISSION_CATEGORIES:
+        rules.append({"permission": category, "pattern": "*", "action": "deny"})
+    for permission in sorted(
+        _MUTATING_OPENCODE_PERMS
+        | _ASK_BY_DEFAULT_MCP_PERMS
+        | _ALWAYS_ALLOWED_OPENCODE_PERMS
+        | {"task"}
+    ):
+        rules.append({"permission": permission, "pattern": "*", "action": "deny"})
+    return rules
+
+
+def _count_assistant_message_rows(rows: list[Any]) -> int:
+    """Count assistant turns in OpenCode's session-message response."""
+    count = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        info = row.get("info")
+        if isinstance(info, dict) and info.get("role") == "assistant":
+            count += 1
+    return count
 
 
 def _coerce_mcp_config(name: str, raw_config: Any) -> dict[str, Any]:

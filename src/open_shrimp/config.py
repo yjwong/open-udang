@@ -92,12 +92,20 @@ class ReviewConfig:
 
 
 @dataclass
+class PromptSuggestionsConfig:
+    enabled: bool = True
+
+
+@dataclass
 class Config:
     telegram: TelegramConfig
     allowed_users: list[int]
     contexts: dict[str, ContextConfig]
     default_context: str
     review: ReviewConfig = field(default_factory=ReviewConfig)
+    prompt_suggestions: PromptSuggestionsConfig = field(
+        default_factory=PromptSuggestionsConfig
+    )
     instance_name: str | None = None
     auto_update: bool = True
 
@@ -380,12 +388,22 @@ def _parse(raw: dict) -> Config:
         tunnel=tunnel_raw,
     )
 
+    prompt_suggestions_raw = raw.get("prompt_suggestions", {})
+    if prompt_suggestions_raw is None:
+        prompt_suggestions_raw = {}
+    if not isinstance(prompt_suggestions_raw, dict):
+        raise ValueError("prompt_suggestions must be a mapping")
+    prompt_suggestions = PromptSuggestionsConfig(
+        enabled=bool(prompt_suggestions_raw.get("enabled", True))
+    )
+
     return Config(
         telegram=TelegramConfig(token=raw["telegram"]["token"]),
         allowed_users=raw["allowed_users"],
         contexts=contexts,
         default_context=raw["default_context"],
         review=review,
+        prompt_suggestions=prompt_suggestions,
         instance_name=raw.get("instance_name"),
         auto_update=bool(raw.get("auto_update", True)),
     )
@@ -504,6 +522,9 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         review_dict["tunnel"] = config.review.tunnel
     if review_dict:
         result["review"] = review_dict
+
+    if not config.prompt_suggestions.enabled:
+        result["prompt_suggestions"] = {"enabled": False}
 
     if config.instance_name is not None:
         result["instance_name"] = config.instance_name

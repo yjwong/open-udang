@@ -74,6 +74,9 @@ class StreamResult:
     turn_usage: dict[str, Any] | None = None
     num_steps: int = 0
     duration_ms: int = 0
+    sent_message_ids: list[int] = field(default_factory=list)
+    last_turn_had_error: bool = False
+    assistant_turn_count: int | None = None
 
 
 @dataclass
@@ -682,6 +685,7 @@ async def stream_response(
         StreamResult with session_id, usage, cost, and timing info.
     """
     state = draft_state or _DraftState(chat_id=chat_id)
+    sent_message_start = len(state.sent_message_ids)
     auto_set = set(allowed_tools or [])
     result = StreamResult()
     draft_task: asyncio.Task[None] | None = None
@@ -698,6 +702,7 @@ async def stream_response(
 
         async for event in events:
             if isinstance(event, AssistantMessage):
+                result.assistant_turn_count = (result.assistant_turn_count or 0) + 1
                 # Capture per-turn token usage.
                 turn_usage = event.usage
                 if turn_usage:
@@ -706,6 +711,7 @@ async def stream_response(
                 # Check for SDK-level errors (auth failures, billing,
                 # rate limits, etc.) and surface them to the user.
                 if event.error:
+                    result.last_turn_had_error = True
                     # Extract error detail from content blocks (the SDK
                     # puts the human-readable reason in a TextBlock, e.g.
                     # "Prompt is too long").
@@ -861,6 +867,7 @@ async def stream_response(
         if state.raw_text.strip():
             msg_ids = await _finalize_message(bot, state, silent=False)
             state.sent_message_ids.extend(msg_ids)
+        result.sent_message_ids = list(state.sent_message_ids[sent_message_start:])
 
         # Reset for the next stream_response() iteration.
         state.raw_text = ""

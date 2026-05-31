@@ -38,6 +38,7 @@ class MockOpenCode:
         self.patched_sessions: list[dict[str, Any]] = []
         # Records aborts.
         self.aborted_sessions: list[str] = []
+        self.deleted_sessions: list[str] = []
         # Records dynamic MCP server registrations.
         self.mcp_registrations: list[dict[str, Any]] = []
         # Per-session "stored" messages used by GET /session/{sid}/message/{mid}.
@@ -63,6 +64,16 @@ class MockOpenCode:
                     "/session/{sid}",
                     self._patch_session,
                     methods=["PATCH"],
+                ),
+                Route(
+                    "/session/{sid}",
+                    self._delete_session,
+                    methods=["DELETE"],
+                ),
+                Route(
+                    "/session/{sid}/message",
+                    self._list_messages,
+                    methods=["GET"],
                 ),
                 Route(
                     "/session/{sid}/fork",
@@ -211,6 +222,16 @@ class MockOpenCode:
         sid = request.path_params["sid"]
         self.aborted_sessions.append(sid)
         return Response(status_code=204)
+
+    async def _delete_session(self, request: Request) -> Response:
+        sid = request.path_params["sid"]
+        self.deleted_sessions.append(sid)
+        return Response(status_code=204)
+
+    async def _list_messages(self, request: Request) -> Response:
+        sid = request.path_params["sid"]
+        rows = [message for (session_id, _), message in self.messages.items() if session_id == sid]
+        return JSONResponse({"messages": rows})
 
     async def _get_message(self, request: Request) -> Response:
         sid = request.path_params["sid"]

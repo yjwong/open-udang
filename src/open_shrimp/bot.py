@@ -62,6 +62,7 @@ from open_shrimp.handlers.commands import (
 from open_shrimp.handlers.messages import message_handler, web_app_data_handler
 from open_shrimp.handlers.questions import _handle_question_callback
 from open_shrimp.handlers.utils import _is_authorized
+from open_shrimp.prompt_suggestion import CALLBACK_PREFIX, handle_suggestion_callback
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     if not _is_authorized(query.from_user and query.from_user.id, config):
         await query.answer("Unauthorized.")
+        return
+
+    if data.startswith(CALLBACK_PREFIX):
+        await handle_suggestion_callback(query, data)
         return
 
     # /context selection and pagination

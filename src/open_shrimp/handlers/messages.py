@@ -21,6 +21,10 @@ from open_shrimp.agent import (
 from open_shrimp import agent_tasks
 from open_shrimp.stt import transcribe as stt_transcribe
 from open_shrimp.opencode_client import CLIConnectionError, ProcessError
+from open_shrimp.prompt_suggestion import (
+    schedule_prompt_suggestion,
+    supersede_prompt_suggestion,
+)
 from open_shrimp.client_manager import (
     CallbackContext,
     close_session,
@@ -446,6 +450,8 @@ async def _dispatch_to_agent(
     start), a short feedback message is sent to the chat immediately
     so the user doesn't see silence while the session initialises.
     """
+    supersede_prompt_suggestion(scope)
+
     # Serialise per scope so two messages arriving together cannot both
     # slip through the "no task running" check before either has set
     # _running_tasks[scope].
@@ -1024,6 +1030,16 @@ async def _start_agent_task(
                             turn_usage=result.turn_usage,
                             todos=latest_todos if latest_todos else None,
                         )
+
+                    schedule_prompt_suggestion(
+                        bot=context.bot,
+                        scope=scope,
+                        config=config,
+                        client=session.client,
+                        result=result,
+                        context_name=ctx_name,
+                        context_config=ctx_config,
+                    )
 
                     injected_notifications = 0
                     if session.session_id:

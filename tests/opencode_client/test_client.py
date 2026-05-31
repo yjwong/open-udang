@@ -233,6 +233,65 @@ async def test_fork_session_accepts_message_id(
     assert mock_server.forked_sessions[-1]["body"] == {"messageID": "msg_123"}
 
 
+async def test_generate_prompt_suggestion_uses_deny_all_fork_and_cleans_up(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/parent", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        suggestion_task = asyncio.create_task(
+            client.generate_prompt_suggestion(prompt="suggest", timeout=2.0)
+        )
+        while not mock_server.forked_sessions:
+            await asyncio.sleep(0)
+        fork_id = mock_server.forked_sessions[-1]["id"]
+        mock_server.script(fork_id, [text_delta("p1", "run tests"), session_idle()])
+        suggestion = await suggestion_task
+
+    assert suggestion == "run tests"
+    assert mock_server.patched_sessions[-1]["session_id"] == fork_id
+    assert mock_server.patched_sessions[-1]["body"]["permission"][0] == {
+        "permission": "*",
+        "pattern": "*",
+        "action": "deny",
+    }
+    assert mock_server.prompts[-1]["session_id"] == fork_id
+    assert mock_server.aborted_sessions[-1] == fork_id
+    assert mock_server.deleted_sessions[-1] == fork_id
+
+
+async def test_count_assistant_turns_reads_session_messages(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/parent", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        sid = client.session_id
+        assert sid is not None
+        mock_server.messages[(sid, "u1")] = {
+            "info": {"id": "u1", "role": "user"},
+            "parts": [],
+        }
+        mock_server.messages[(sid, "a1")] = {
+            "info": {"id": "a1", "role": "assistant"},
+            "parts": [],
+        }
+        mock_server.messages[(sid, "a2")] = {
+            "info": {"id": "a2", "role": "assistant"},
+            "parts": [],
+        }
+        assert await client.count_assistant_turns(sid) == 2
+
+
+async def test_count_assistant_turns_ignores_non_contract_role_shape(
+    mock_server: MockOpenCode, wired_server
+) -> None:
+    opts = OpenCodeOptions(cwd="/parent", provider="openai", model="gpt-test")
+    async with OpenCodeClient(opts) as client:
+        sid = client.session_id
+        assert sid is not None
+        mock_server.messages[(sid, "a1")] = {"id": "a1", "role": "assistant"}
+        assert await client.count_assistant_turns(sid) == 0
+
+
 async def test_supplied_endpoint_skips_host_singleton(mock_setup, monkeypatch) -> None:
     mock_server, base_url = mock_setup
 

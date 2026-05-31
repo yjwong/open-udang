@@ -82,6 +82,12 @@ contexts:
 
 default_context: default
 
+# Prompt suggestions (optional). When enabled, OpenShrimp may append a single
+# inline button to the last assistant message predicting the user's next prompt.
+# Set OPENSHRIMP_ENABLE_PROMPT_SUGGESTION=0/1 to override at runtime.
+# prompt_suggestions:
+#   enabled: true
+
 # Instance name (required when running multiple OpenShrimp instances on the
 # same host).  Isolates the database, sandbox state, Docker images, Lima VMs,
 # and build logs so instances don't collide.  When omitted (single-instance),
