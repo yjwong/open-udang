@@ -261,8 +261,10 @@ _DEFAULT_CONTEXT_LIMIT = 200_000
 # Status emoji map for MCP server connection status.
 _MCP_STATUS_EMOJI: dict[str, str] = {
     "connected": "\U0001f7e2",
+    "connecting": "\U0001f7e1",
     "pending": "\U0001f7e1",
     "failed": "\U0001f534",
     "needs-auth": "\U0001f7e0",
     "disabled": "\u26aa",
+    "disconnected": "\u26aa",
 }

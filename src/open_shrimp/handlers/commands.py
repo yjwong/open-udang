@@ -1405,8 +1405,8 @@ async def mcp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     Usage:
         /mcp                    -- list all MCP servers and their status
         /mcp reset <name>       -- reconnect a failed/disconnected server
-        /mcp enable <name>      -- enable a server
-        /mcp disable <name>     -- disable a server
+        /mcp enable <name>      -- connect a server
+        /mcp disable <name>     -- disconnect a server
     """
     config: Config = context.bot_data["config"]
     db: aiosqlite.Connection = context.bot_data["db"]
@@ -1453,8 +1453,8 @@ async def mcp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "Unknown subcommand\\. Usage:\n"
             "`/mcp` \u2014 list servers\n"
             "`/mcp reset <name>` \u2014 reconnect a server\n"
-            "`/mcp enable <name>` \u2014 enable a server\n"
-            "`/mcp disable <name>` \u2014 disable a server",
+            "`/mcp enable <name>` \u2014 connect a server\n"
+            "`/mcp disable <name>` \u2014 disconnect a server",
             parse_mode="MarkdownV2",
         )
 
@@ -1525,7 +1525,7 @@ async def _mcp_reconnect(message: Any, session: AgentSession, server_name: str) 
 
     escaped = _escape_mdv2(server_name)
     await message.reply_text(
-        f"Reconnecting `{escaped}`\\.\\.\\. Use /mcp to check status\\.",
+        f"Reconnect requested for `{escaped}`\\. Use /mcp to check status\\.",
         parse_mode="MarkdownV2",
     )
 
@@ -1543,11 +1543,13 @@ async def _mcp_toggle(message: Any, session: AgentSession, server_name: str, *, 
         )
         return
 
-    past = "enabled" if enabled else "disabled"
     escaped = _escape_mdv2(server_name)
-    emoji = "\U0001f7e2" if enabled else "\u26aa"
+    if enabled:
+        text = f"\U0001f7e2 Connect requested for `{escaped}`\\. Use /mcp to check status\\."
+    else:
+        text = f"\u26aa Disconnected `{escaped}`\\."
     await message.reply_text(
-        f"{emoji} `{escaped}` {past}\\.",
+        text,
         parse_mode="MarkdownV2",
     )
 

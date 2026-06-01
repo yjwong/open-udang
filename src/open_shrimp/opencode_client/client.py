@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -302,6 +303,58 @@ class OpenCodeClient:
                 raise ProcessError(
                     f"POST /mcp for {name!r} returned {r.status_code}: {r.text[:300]}"
                 )
+
+    async def get_mcp_status(self) -> dict[str, Any]:
+        """Return MCP status in the Claude-compatible handler shape."""
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient.get_mcp_status called before connect()")
+        params: dict[str, str] = {}
+        if self._options.cwd:
+            params["directory"] = self._options.cwd
+        try:
+            r = await self._http.get("/mcp", params=params)
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(f"GET /mcp failed: {exc}") from exc
+        if r.status_code == 401:
+            raise OpenCodeAuthError("opencode serve rejected our credentials")
+        if r.status_code >= 400:
+            raise ProcessError(f"GET /mcp returned {r.status_code}: {r.text[:300]}")
+        payload = r.json()
+        if not isinstance(payload, dict):
+            raise ProcessError(f"GET /mcp returned unexpected payload: {payload!r}")
+        servers: list[dict[str, Any]] = []
+        for name, status in payload.items():
+            if isinstance(status, dict):
+                servers.append({"name": name, **status})
+            else:
+                servers.append({"name": name, "status": status})
+        return {"mcpServers": servers}
+
+    async def reconnect_mcp_server(self, name: str) -> None:
+        """Request an OpenCode MCP server reconnect."""
+        await self._post_mcp_connection(name, action="connect")
+
+    async def toggle_mcp_server(self, name: str, *, enabled: bool) -> None:
+        """Request a runtime connect or disconnect for an MCP server."""
+        action = "connect" if enabled else "disconnect"
+        await self._post_mcp_connection(name, action=action)
+
+    async def _post_mcp_connection(self, name: str, *, action: str) -> None:
+        if self._http is None:
+            raise CLIConnectionError("OpenCodeClient MCP management called before connect()")
+        params: dict[str, str] = {}
+        if self._options.cwd:
+            params["directory"] = self._options.cwd
+        quoted_name = quote(name, safe="")
+        endpoint = f"/mcp/{quoted_name}/{action}"
+        try:
+            r = await self._http.post(endpoint, params=params)
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(f"POST {endpoint} failed: {exc}") from exc
+        if r.status_code == 401:
+            raise OpenCodeAuthError("opencode serve rejected our credentials")
+        if r.status_code >= 400:
+            raise ProcessError(f"POST {endpoint} returned {r.status_code}: {r.text[:300]}")
 
     def _build_initial_rules(self) -> list[dict[str, Any]]:
         """Construct the initial permission ruleset for this session.

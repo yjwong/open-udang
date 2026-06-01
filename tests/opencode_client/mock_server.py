@@ -41,6 +41,9 @@ class MockOpenCode:
         self.deleted_sessions: list[str] = []
         # Records dynamic MCP server registrations.
         self.mcp_registrations: list[dict[str, Any]] = []
+        self.mcp_status: dict[str, dict[str, Any]] = {}
+        self.mcp_connects: list[dict[str, Any]] = []
+        self.mcp_disconnects: list[dict[str, Any]] = []
         # Per-session "stored" messages used by GET /session/{sid}/message/{mid}.
         # Tests script this when they need the bridge's message-fetch
         # fallback to find a matching ToolPart.
@@ -98,6 +101,21 @@ class MockOpenCode:
                 Route(
                     "/mcp",
                     self._add_mcp,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/mcp",
+                    self._get_mcp,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/mcp/{name:path}/connect",
+                    self._connect_mcp,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/mcp/{name:path}/disconnect",
+                    self._disconnect_mcp,
                     methods=["POST"],
                 ),
                 Route(
@@ -251,6 +269,35 @@ class MockOpenCode:
         )
         return JSONResponse({"ok": True})
 
+    async def _get_mcp(self, request: Request) -> Response:
+        return JSONResponse(self.mcp_status)
+
+    async def _connect_mcp(self, request: Request) -> Response:
+        name = request.path_params["name"]
+        if name not in self.mcp_status:
+            return _mcp_not_found(name)
+        self.mcp_connects.append(
+            {
+                "name": name,
+                "params": dict(request.query_params),
+                "raw_path": request.scope.get("raw_path", b"").decode("utf-8"),
+            }
+        )
+        return JSONResponse(True)
+
+    async def _disconnect_mcp(self, request: Request) -> Response:
+        name = request.path_params["name"]
+        if name not in self.mcp_status:
+            return _mcp_not_found(name)
+        self.mcp_disconnects.append(
+            {
+                "name": name,
+                "params": dict(request.query_params),
+                "raw_path": request.scope.get("raw_path", b"").decode("utf-8"),
+            }
+        )
+        return JSONResponse(True)
+
     async def _permission_reply(self, request: Request) -> Response:
         rid = request.path_params["rid"]
         try:
@@ -297,6 +344,17 @@ def _ensure_session_id(evt: dict[str, Any], sid: str) -> dict[str, Any]:
     props.setdefault("sessionID", sid)
     out["properties"] = props
     return out
+
+
+def _mcp_not_found(name: str) -> Response:
+    return JSONResponse(
+        {
+            "_tag": "McpServerNotFoundError",
+            "name": name,
+            "message": f"MCP server not found: {name}",
+        },
+        status_code=404,
+    )
 
 
 def text_delta(part_id: str, delta: str) -> dict[str, Any]:
