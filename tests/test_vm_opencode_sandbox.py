@@ -7,6 +7,7 @@ from open_shrimp.sandbox.libvirt import LibvirtSandbox
 from open_shrimp.sandbox.lima import LimaSandbox
 from open_shrimp.sandbox.lima_helpers import _build_mounts
 from open_shrimp.sandbox.lima_macos_helpers import _build_mounts_macos
+from open_shrimp.sandbox.skill_paths import global_skill_dir_candidates
 
 
 class FakeProc:
@@ -41,6 +42,18 @@ class FakeProc:
         self.returncode = -9
 
 
+def test_global_skill_dir_candidates_support_opencode_and_external_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    assert global_skill_dir_candidates(guest_home="/guest") == [
+        (tmp_path / ".claude" / "skills", "/guest/.claude/skills"),
+        (tmp_path / ".agents" / "skills", "/guest/.agents/skills"),
+        (tmp_path / ".config" / "opencode" / "skills", "/guest/.config/opencode/skills"),
+        (tmp_path / ".config" / "opencode" / "skill", "/guest/.config/opencode/skill"),
+    ]
+
+
 def test_lima_mounts_opencode_home_for_linux_and_macos(tmp_path, monkeypatch):
     monkeypatch.setattr("getpass.getuser", lambda: "alice")
 
@@ -57,6 +70,82 @@ def test_lima_mounts_opencode_home_for_linux_and_macos(tmp_path, monkeypatch):
         "mountPoint": "/Users/alice.guest/Library/Application Support/opencode",
         "writable": True,
     } in macos_mounts
+
+
+def test_lima_mounts_global_skill_dirs(tmp_path, monkeypatch):
+    paths = {
+        tmp_path / ".claude" / "skills": (
+            "/home/alice.guest/.claude/skills",
+            "/Users/alice.guest/.claude/skills",
+        ),
+        tmp_path / ".agents" / "skills": (
+            "/home/alice.guest/.agents/skills",
+            "/Users/alice.guest/.agents/skills",
+        ),
+        tmp_path / ".config" / "opencode" / "skills": (
+            "/home/alice.guest/.config/opencode/skills",
+            "/Users/alice.guest/.config/opencode/skills",
+        ),
+        tmp_path / ".config" / "opencode" / "skill": (
+            "/home/alice.guest/.config/opencode/skill",
+            "/Users/alice.guest/.config/opencode/skill",
+        ),
+    }
+    for path in paths:
+        path.mkdir(parents=True)
+    monkeypatch.setattr("getpass.getuser", lambda: "alice")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    linux_mounts = _build_mounts(tmp_path, "/repo", None)
+    macos_mounts = _build_mounts_macos(tmp_path, "/repo", None)
+
+    for skills, (mount_point, _) in paths.items():
+        assert {
+            "location": str(skills),
+            "mountPoint": mount_point,
+            "writable": False,
+        } in linux_mounts
+
+    for skills, (_, mount_point) in paths.items():
+        assert {
+            "location": str(skills),
+            "mountPoint": mount_point,
+            "writable": False,
+        } in macos_mounts
+
+
+def test_libvirt_mounts_global_skill_dirs(tmp_path, monkeypatch):
+    claude_skills = tmp_path / ".claude" / "skills"
+    agents_skills = tmp_path / ".agents" / "skills"
+    opencode_skills = tmp_path / ".config" / "opencode" / "skills"
+    opencode_skill = tmp_path / ".config" / "opencode" / "skill"
+    for path in (claude_skills, agents_skills, opencode_skills, opencode_skill):
+        path.mkdir(parents=True)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    with (
+        patch("open_shrimp.sandbox.libvirt.state_dir_for", return_value=tmp_path / "state"),
+        patch("open_shrimp.sandbox.libvirt.find_virtiofsd", return_value=None),
+    ):
+        sandbox = LibvirtSandbox(
+            "dev",
+            SandboxConfig(backend="libvirt"),
+            "/repo",
+            conn=object(),
+        )
+        all_dirs, mount_overrides, readonly_dirs = sandbox._shared_dirs_and_overrides()
+
+    assert str(claude_skills) in all_dirs
+    assert str(agents_skills) in all_dirs
+    assert str(opencode_skills) in all_dirs
+    assert str(opencode_skill) in all_dirs
+    assert mount_overrides[str(claude_skills)] == "/home/claude/.claude/skills"
+    assert mount_overrides[str(agents_skills)] == "/home/claude/.agents/skills"
+    assert mount_overrides[str(opencode_skills)] == "/home/claude/.config/opencode/skills"
+    assert mount_overrides[str(opencode_skill)] == "/home/claude/.config/opencode/skill"
+    assert {str(claude_skills), str(agents_skills), str(opencode_skills), str(opencode_skill)} <= readonly_dirs
 
 
 def test_libvirt_ensure_opencode_server_starts_guest_server(tmp_path):

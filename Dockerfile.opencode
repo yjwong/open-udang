@@ -42,6 +42,9 @@ RUN apt-get update \
 # must exist and be writable.
 RUN mkdir -p /home/claude/.local/share/docker \
         /home/claude/.local/share/opencode \
+        /home/claude/.config/opencode \
+        /home/claude/.claude \
+        /home/claude/.agents \
     && chmod -R 777 /home/claude
 
 # Allow the runtime user (arbitrary uid via --user) to write subuid/subgid

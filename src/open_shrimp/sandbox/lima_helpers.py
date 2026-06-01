@@ -26,6 +26,7 @@ from pathlib import Path
 import yaml
 from open_shrimp.config import SandboxConfig
 from open_shrimp.paths import data_dir as _data_dir, get_instance_name as _get_instance_name
+from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -368,11 +369,10 @@ def _build_mounts(
         "writable": True,
     })
 
-    host_skills = Path.home() / ".claude" / "skills"
-    if host_skills.is_dir():
+    for host_skills, mount_point in existing_global_skill_dirs(guest_home=vm_home):
         mounts.append({
             "location": str(host_skills),
-            "mountPoint": f"{vm_home}/.claude/skills",
+            "mountPoint": mount_point,
             "writable": False,
         })
 

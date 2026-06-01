@@ -100,3 +100,33 @@ def test_docker_run_mounts_opencode_home_and_port(tmp_path, monkeypatch):
     assert f"{tmp_path}/containers/dev:/home/claude/.claude" not in joined
     assert "-p" in argv
     assert f"127.0.0.1::{OPENCODE_GUEST_PORT}" in argv
+
+
+def test_docker_run_mounts_global_skill_dirs(tmp_path, monkeypatch):
+    claude_skills = tmp_path / ".claude" / "skills"
+    agents_skills = tmp_path / ".agents" / "skills"
+    opencode_skills = tmp_path / ".config" / "opencode" / "skills"
+    opencode_skill = tmp_path / ".config" / "opencode" / "skill"
+    for path in (claude_skills, agents_skills, opencode_skills, opencode_skill):
+        path.mkdir(parents=True)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(
+        "open_shrimp.sandbox.docker_helpers.container_state_dir",
+        lambda: tmp_path / "containers",
+    )
+
+    with patch(
+        "open_shrimp.sandbox.docker_helpers.subprocess.check_output",
+        side_effect=FileNotFoundError,
+    ):
+        argv, _ = _build_docker_run_argv(
+            context_name="dev",
+            project_dir="/workspace/project",
+        )
+
+    joined = "\n".join(argv)
+    assert f"type=bind,source={claude_skills},target=/home/claude/.claude/skills,readonly" in joined
+    assert f"type=bind,source={agents_skills},target=/home/claude/.agents/skills,readonly" in joined
+    assert f"type=bind,source={opencode_skills},target=/home/claude/.config/opencode/skills,readonly" in joined
+    assert f"type=bind,source={opencode_skill},target=/home/claude/.config/opencode/skill,readonly" in joined

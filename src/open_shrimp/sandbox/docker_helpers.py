@@ -28,6 +28,7 @@ from importlib.resources import files as _pkg_files
 from pathlib import Path
 
 from open_shrimp.paths import data_dir as _data_dir
+from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -722,10 +723,9 @@ def _build_docker_run_argv(
     # Expose the sandbox-owned OpenCode server to the host via loopback.
     docker_argv.extend(["-p", f"127.0.0.1::{OPENCODE_GUEST_PORT}"])
     # Sub-mount on top of state_dir; Docker resolves nested binds in flag order.
-    host_skills = Path.home() / ".claude" / "skills"
-    if host_skills.is_dir():
+    for host_skills, guest_skills in existing_global_skill_dirs():
         docker_argv.extend([
-            "-v", f"{host_skills}:/home/claude/.claude/skills:ro",
+            "--mount", f"type=bind,source={host_skills},target={guest_skills},readonly",
         ])
     for extra_dir in additional_directories or []:
         docker_argv.extend(["-v", f"{extra_dir}:{extra_dir}"])

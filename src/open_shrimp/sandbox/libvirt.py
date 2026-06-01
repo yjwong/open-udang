@@ -71,6 +71,7 @@ from open_shrimp.sandbox.docker import (
     _wait_for_opencode_ready,
 )
 from open_shrimp.sandbox.docker_helpers import OPENCODE_GUEST_PORT
+from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -979,11 +980,10 @@ class LibvirtSandbox:
             str(self._opencode_home_dir): "/home/claude/.local/share/opencode",
         }
         readonly_dirs: set[str] = set()
-        host_skills = Path.home() / ".claude" / "skills"
-        if host_skills.is_dir():
+        for host_skills, guest_skills in existing_global_skill_dirs():
             host_skills_str = str(host_skills)
             all_dirs.append(host_skills_str)
-            mount_overrides[host_skills_str] = "/home/claude/.claude/skills"
+            mount_overrides[host_skills_str] = guest_skills
             readonly_dirs.add(host_skills_str)
         return all_dirs, mount_overrides, readonly_dirs
 
