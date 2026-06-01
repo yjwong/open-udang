@@ -278,13 +278,14 @@ def _build_cloud_init_user_data(
     that :func:`generate_cloud_init_iso` writes, ensuring any template
     change triggers a VM rebuild.
     """
-    # Build write_files entries.
-    write_files = "write_files:\n"
+    # Build write_files entries. Avoid emitting an empty write_files: key;
+    # cloud-init expects a list when the key is present.
+    write_files_entries = ""
 
     if computer_use:
         # Items appended here are already dedented — use exact indentation
         # (2-space indent for YAML list items under write_files:).
-        write_files += (
+        write_files_entries += (
             "  # labwc Wayland compositor on virtio-gpu DRM (computer-use).\n"
             "  - path: /etc/systemd/system/wayland-compositor.service\n"
             "    content: |\n"
@@ -365,10 +366,10 @@ def _build_cloud_init_user_data(
                 f"WantedBy=multi-user.target\n"
             )
             # Write the systemd mount unit file via write_files.
-            write_files += f"  - path: /etc/systemd/system/{unit_name}\n"
-            write_files += f"    content: |\n"
+            write_files_entries += f"  - path: /etc/systemd/system/{unit_name}\n"
+            write_files_entries += f"    content: |\n"
             for line in unit_content.splitlines():
-                write_files += f"      {line}\n"
+                write_files_entries += f"      {line}\n"
 
         # bootcmd runs before runcmd, on every boot.  Format unformatted
         # disks and start mount units so the provision script (runcmd)
@@ -420,6 +421,8 @@ def _build_cloud_init_user_data(
             "  - systemctl enable --now seatd.service\n"
             "  - systemctl enable --now wayland-compositor.service\n"
         )
+
+    write_files = f"write_files:\n{write_files_entries}" if write_files_entries else ""
 
     user_data = textwrap.dedent(f"""\
         #cloud-config
