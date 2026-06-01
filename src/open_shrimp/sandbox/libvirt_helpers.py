@@ -1159,6 +1159,7 @@ def start_virtiofsd(
         argv,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
+        start_new_session=True,
     )
     logger.info(
         "Started virtiofsd (pid=%d) socket=%s shared=%s",
