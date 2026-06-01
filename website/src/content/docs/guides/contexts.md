@@ -26,7 +26,7 @@ contexts:
     allowed_tools:
       - LSP
       - "Bash(go *)"
-    model: opus
+    model: openai/gpt-5.5
 
   docs:
     directory: /home/you/Documents/docs
@@ -49,7 +49,7 @@ default_context: frontend
 
 | Field | Description |
 |-------|-------------|
-| `model` | Override the model for this context (`sonnet`, `opus`, `haiku`, or a full model ID) |
+| `model` | Override the model for this context in OpenCode provider/model form, such as `openai/gpt-5.5` |
 | `additional_directories` | Extra directories the agent can access (path-scoped approval extends to these) |
 | `default_for_chats` | Chat IDs where this context is auto-selected on first use |
 | `locked_for_chats` | Chat IDs locked to this context — users cannot switch away |
@@ -140,10 +140,10 @@ contexts:
     description: "Quick scripting tasks"
     allowed_tools:
       - LSP
-    model: haiku
+    model: openai/gpt-5.5
 ```
 
-Users can still override the model per-session with `/model opus`. The override is cleared on `/clear` or context switch.
+Users can still override the model per-session with `/model openai/gpt-5.5`. The override is cleared on `/clear` or context switch.
 
 ## Per-context sessions
 

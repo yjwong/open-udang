@@ -27,9 +27,16 @@
       "$ref": "#/$defs/ReviewConfig",
       "description": "Mini App HTTP server settings."
     },
+    "prompt_suggestions": {
+      "$ref": "#/$defs/PromptSuggestionsConfig"
+    },
     "instance_name": {
       "description": "Display name for this instance.",
       "default": null
+    },
+    "auto_update": {
+      "type": "boolean",
+      "default": true
     }
   },
   "required": [
@@ -66,6 +73,10 @@
           "description": "Enable or disable the sandbox.",
           "default": true
         },
+        "guest_os": {
+          "type": "string",
+          "default": "linux"
+        },
         "docker_in_docker": {
           "type": "boolean",
           "description": "Enable rootless Docker inside the container (Docker backend).",
@@ -78,6 +89,10 @@
         "computer_use": {
           "type": "boolean",
           "description": "Enable GUI interaction with a headless desktop.",
+          "default": false
+        },
+        "virgl": {
+          "type": "boolean",
           "default": false
         },
         "memory": {
@@ -102,6 +117,17 @@
         "provision": {
           "description": "Shell script to run on first boot (Libvirt backend).",
           "default": null
+        },
+        "persistent_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "allow_host_escape": {
+          "type": "boolean",
+          "default": false
         }
       },
       "required": [
@@ -127,7 +153,10 @@
           "description": "Tools auto-approved without prompting. Glob patterns supported."
         },
         "model": {
-          "description": "Model override. Short names: sonnet, opus, haiku.",
+          "description": "Model override in provider/model form, e.g. openai/gpt-5.5.",
+          "default": null
+        },
+        "effort": {
           "default": null
         },
         "additional_directories": {

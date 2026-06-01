@@ -15,12 +15,8 @@ interface ContextEditorProps {
 type PathStatus = "idle" | "checking" | "valid" | "invalid";
 
 const MODELS = [
-  { value: "", label: "CLI default" },
-  { value: "opus", label: "opus" },
-  { value: "opus[1m]", label: "opus[1m]" },
-  { value: "sonnet", label: "sonnet" },
-  { value: "sonnet[1m]", label: "sonnet[1m]" },
-  { value: "haiku", label: "haiku" },
+  { value: "openai/gpt-5.5", label: "openai/gpt-5.5" },
+  { value: "anthropic/claude-sonnet-4-6", label: "anthropic/claude-sonnet-4-6" },
 ] as const;
 
 function usePathValidation() {
@@ -175,17 +171,20 @@ export default function ContextEditor({
 
         <div className="form-group">
           <label className="form-label">Model</label>
-          <select
+          <input
             className="form-input"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-          >
+            list="model-options"
+            placeholder="provider/model, e.g. openai/gpt-5.5"
+          />
+          <datalist id="model-options">
             {MODELS.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
-          </select>
+          </datalist>
         </div>
 
         <div className="form-group">

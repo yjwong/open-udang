@@ -39,11 +39,11 @@ Show or change the model for the current session.
 
 ```
 /model          # show current model
-/model opus     # switch to Opus
+/model openai/gpt-5.5  # switch to GPT-5.5 via OpenAI
 /model reset    # revert to default
 ```
 
-Short names are supported: `sonnet`, `opus`, `haiku`. You can also use a full model ID.
+Models must use OpenCode's provider/model form, such as `openai/gpt-5.5` or `anthropic/claude-sonnet-4-6`.
 
 ### `/resume [session_id]`
 

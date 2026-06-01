@@ -59,11 +59,9 @@ _WINDOW_HEIGHT = 380
 _CONTENT_INSET = 32
 _CONTENT_WIDTH = _WINDOW_WIDTH - 2 * _CONTENT_INSET
 
-_MODELS: tuple[tuple[str | None, str], ...] = (
-    (None, "CLI default (recommended)"),
-    ("sonnet", "Fast and capable"),
-    ("opus", "Most capable, slower"),
-    ("haiku", "Fastest, least capable"),
+_MODELS: tuple[tuple[str, str], ...] = (
+    ("openai/gpt-5.5", "OpenAI GPT-5.5"),
+    ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet"),
 )
 
 # Module-level reference to prevent GC of the active controller.
@@ -600,8 +598,7 @@ class SetupWizardController(NSObject):
             False,
         )
         for model_name, model_desc in _MODELS:
-            display = model_name or "CLI default"
-            self._model_popup.addItemWithTitle_(f"{display} — {model_desc}")
+            self._model_popup.addItemWithTitle_(f"{model_name} — {model_desc}")
         self._model_popup.addItemWithTitle_("Custom…")
         self._model_popup.setTarget_(self)
         self._model_popup.setAction_("modelChanged:")
@@ -610,7 +607,7 @@ class SetupWizardController(NSObject):
         # Custom model field (hidden by default)
         y -= 26
         self._custom_model_label = _make_label(
-            "Custom model name",
+            "Custom provider/model",
             (0, y + 2, 130, 18),
             font=NSFont.systemFontOfSize_(12),
         )
@@ -619,7 +616,7 @@ class SetupWizardController(NSObject):
 
         self._custom_model_field = _make_text_field(
             (130, y, w - 130, 24),
-            placeholder="e.g. claude-sonnet-4-5-20250514",
+            placeholder="e.g. openai/gpt-5.5",
         )
         self._custom_model_field.setHidden_(True)
         view.addSubview_(self._custom_model_field)
@@ -731,7 +728,7 @@ class SetupWizardController(NSObject):
         if self._model_popup.indexOfSelectedItem() == len(_MODELS):
             custom = self._custom_model_field.stringValue().strip()
             if not custom:
-                self._context_error.setStringValue_("Enter a custom model name.")
+                self._context_error.setStringValue_("Enter a custom provider/model.")
                 return False
 
         self._context_error.setStringValue_("")

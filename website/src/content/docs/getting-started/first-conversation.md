@@ -51,7 +51,7 @@ To start fresh:
 | `/status` | Show current context, model, session, and running state |
 | `/context` | List available contexts or switch to a different one |
 | `/cancel` | Abort a running Claude task |
-| `/model opus` | Switch to a different model for this session |
+| `/model openai/gpt-5.5` | Switch to a different model for this session |
 
 See the full [Commands reference](/reference/commands/) for all available commands.
 

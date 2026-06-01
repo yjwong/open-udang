@@ -52,7 +52,7 @@ _DESCRIPTIONS: dict[str, dict[str, str]] = {
         "directory": "Absolute path to the project directory.",
         "description": "Short description shown in the context list.",
         "allowed_tools": "Tools auto-approved without prompting. Glob patterns supported.",
-        "model": "Model override. Short names: sonnet, opus, haiku.",
+        "model": "Model override in provider/model form, e.g. openai/gpt-5.5.",
         "additional_directories": "Extra directories the agent can access.",
         "default_for_chats": "Chat IDs where this context is auto-selected.",
         "locked_for_chats": "Chat IDs locked to this context.",

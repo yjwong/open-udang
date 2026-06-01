@@ -28,11 +28,9 @@ def _path_completer(text: str, state: int) -> str | None:
     return matches[state] if state < len(matches) else None
 
 
-_MODELS: tuple[tuple[str | None, str], ...] = (
-    (None, "use CLI default (recommended)"),
-    ("sonnet", "fast and capable"),
-    ("opus", "most capable, slower"),
-    ("haiku", "fastest, least capable"),
+_MODELS: tuple[tuple[str, str], ...] = (
+    ("openai/gpt-5.5", "OpenAI GPT-5.5"),
+    ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet"),
 )
 
 def _prompt(
@@ -158,9 +156,8 @@ def _prompt_context() -> tuple[str, dict[str, Any]]:
     # Model selection
     print("\nSelect a model:")
     for i, (model_name, model_desc) in enumerate(_MODELS, 1):
-        display = model_name or "CLI default"
-        print(f"  {i}. {display} ({model_desc})")
-    print(f"  {len(_MODELS) + 1}. Enter a custom model name")
+        print(f"  {i}. {model_name} ({model_desc})")
+    print(f"  {len(_MODELS) + 1}. Enter a custom provider/model")
 
     def _validate_model_choice(value: str) -> str | None:
         try:
@@ -175,7 +172,7 @@ def _prompt_context() -> tuple[str, dict[str, Any]]:
     if choice <= len(_MODELS):
         model = _MODELS[choice - 1][0]
     else:
-        model = _prompt("Custom model name")
+        model = _prompt("Custom provider/model (e.g. openai/gpt-5.5)")
 
     # Resolve the directory so we store an absolute path.
     resolved_dir = str(Path(directory).expanduser().resolve())

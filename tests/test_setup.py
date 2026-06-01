@@ -28,7 +28,7 @@ class TestRunSetupWizard:
             "myproject",  # context name
             "/tmp",  # directory (always exists)
             "My project",  # description
-            "2",  # model choice (sonnet)
+            "1",  # model choice (OpenAI GPT-5.5)
         )
 
         with patch("builtins.input", side_effect=inputs):
@@ -44,7 +44,7 @@ class TestRunSetupWizard:
 
         ctx = raw["contexts"]["myproject"]
         assert ctx["description"] == "My project"
-        assert ctx["model"] == "sonnet"
+        assert ctx["model"] == "openai/gpt-5.5"
         assert ctx["allowed_tools"] == ["LSP"]
         review = raw["review"]
         assert review["tunnel"] == "cloudflared"
@@ -67,7 +67,7 @@ class TestRunSetupWizard:
         raw = yaml.safe_load(config_path.read_text())
         assert raw["default_context"] == "default"
         assert raw["contexts"]["default"]["description"] == "Default context"
-        assert "model" not in raw["contexts"]["default"]
+        assert raw["contexts"]["default"]["model"] == "openai/gpt-5.5"
 
     def test_custom_model(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
@@ -77,15 +77,15 @@ class TestRunSetupWizard:
             "default",  # context name
             "/tmp",  # directory
             "test",  # description
-            "5",  # model choice (custom)
-            "claude-custom-model",  # custom model name
+            "3",  # model choice (custom)
+            "anthropic/claude-custom-model",  # custom provider/model
         )
 
         with patch("builtins.input", side_effect=inputs):
             run_setup_wizard(config_path)
 
         raw = yaml.safe_load(config_path.read_text())
-        assert raw["contexts"]["default"]["model"] == "claude-custom-model"
+        assert raw["contexts"]["default"]["model"] == "anthropic/claude-custom-model"
 
     def test_ctrl_c_cancels(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
