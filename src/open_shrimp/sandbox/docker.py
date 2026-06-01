@@ -35,6 +35,7 @@ from open_shrimp.sandbox.docker_helpers import (
     get_text_input_state_path as _get_text_input_state_path,
     get_vnc_port as _get_vnc_port,
 )
+from open_shrimp.sandbox.skill_paths import SANDBOX_HOME
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +276,7 @@ class DockerSandbox:
         )
         cmd = [
             "docker", "exec",
-            "-e", "HOME=/home/claude",
+            "-e", f"HOME={SANDBOX_HOME}",
             "-e", f"OPENCODE_SERVER_PASSWORD={password}",
             "-w", self._project_dir,
             self.container_name,

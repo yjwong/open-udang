@@ -1,4 +1,4 @@
-"""Wrapper message classes shaped like the Anthropic SDK's."""
+"""Wrapper message classes used by the OpenShrimp stream layer."""
 
 from __future__ import annotations
 

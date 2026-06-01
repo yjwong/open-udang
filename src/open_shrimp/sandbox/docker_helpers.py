@@ -28,7 +28,11 @@ from importlib.resources import files as _pkg_files
 from pathlib import Path
 
 from open_shrimp.paths import data_dir as _data_dir
-from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
+from open_shrimp.sandbox.skill_paths import (
+    SANDBOX_HOME,
+    SANDBOX_TMP,
+    existing_global_skill_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -545,15 +549,15 @@ set -eu
 MY_UID=$(id -u)
 MY_GID=$(id -g)
 if ! getent passwd "$MY_UID" > /dev/null 2>&1; then
-    echo "claude:x:${MY_UID}:${MY_GID}::/home/claude:/bin/bash" >> /etc/passwd
+    echo "openshrimp:x:${MY_UID}:${MY_GID}::/home/openshrimp:/bin/bash" >> /etc/passwd
 fi
 if ! getent group "$MY_GID" > /dev/null 2>&1; then
-    echo "claude:x:${MY_GID}:" >> /etc/group
+    echo "openshrimp:x:${MY_GID}:" >> /etc/group
 fi
 
 # Register subordinate uid/gid ranges for the current (non-root) user.
-echo "claude:100000:65536" > /etc/subuid
-echo "claude:100000:65536" > /etc/subgid
+echo "openshrimp:100000:65536" > /etc/subuid
+echo "openshrimp:100000:65536" > /etc/subgid
 
 # XDG_RUNTIME_DIR is required by rootless dockerd.  It must be outside
 # /run because rootlesskit's --copy-up=/run overlays /run with a tmpfs
@@ -698,7 +702,7 @@ def _build_docker_run_argv(
         "--label", f"{_CONTAINER_LABEL}=true",
         "--label", f"{_CONTAINER_LABEL}.context={context_name}",
         "--user", f"{uid}:{gid}",
-        "-e", "HOME=/home/claude",
+        "-e", f"HOME={SANDBOX_HOME}",
     ]
     for env_arg in git_env_args:
         docker_argv.extend(["-e", env_arg])
@@ -711,13 +715,13 @@ def _build_docker_run_argv(
 
     # Mount task-output tmp dir inside the container so background task
     # outputs are written to the host-visible state directory.
-    claude_tmp_dir = state_dir / "tmp"
-    claude_tmp_dir.mkdir(exist_ok=True)
+    task_tmp_dir = state_dir / "tmp"
+    task_tmp_dir.mkdir(exist_ok=True)
     opencode_home = get_opencode_home_dir(context_name)
     docker_argv.extend([
         "-v", f"{project_dir}:{project_dir}",
-        "-v", f"{opencode_home}:/home/claude/.local/share/opencode",
-        "-v", f"{claude_tmp_dir}:/tmp/claude-{uid}",
+        "-v", f"{opencode_home}:{SANDBOX_HOME}/.local/share/opencode",
+        "-v", f"{task_tmp_dir}:{SANDBOX_TMP.replace('1000', str(uid))}",
     ])
 
     # Expose the sandbox-owned OpenCode server to the host via loopback.
@@ -742,7 +746,7 @@ def _build_docker_run_argv(
         docker_data_dir = state_dir / "docker-data"
         docker_data_dir.mkdir(exist_ok=True)
         docker_argv.extend([
-            "-v", f"{docker_data_dir}:/home/claude/.local/share/docker",
+            "-v", f"{docker_data_dir}:{SANDBOX_HOME}/.local/share/docker",
         ])
         if not computer_use:
             # Standalone DinD: use the dedicated entrypoint script.

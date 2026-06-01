@@ -112,13 +112,13 @@ class ApprovalRule:
 
 
 # Bash commands that are auto-approved when "accept all edits" is active.
-# Mirrors Claude Code's acceptEdits mode allowlist — these are common
+# Mirrors Claude Code's acceptEdits mode allowlist: common
 # file-manipulation commands that complement Edit/Write auto-approval.
 _ACCEPT_EDITS_BASH_COMMANDS: set[str] = {
     "mkdir", "touch", "rm", "rmdir", "mv", "cp", "sed", "chmod",
 }
 
-# A conservative subset of Claude Code's GIT_READ_ONLY_COMMANDS.  These are
+# A conservative subset of Claude Code's GIT_READ_ONLY_COMMANDS. These are
 # auto-approved only when parsed as simple git invocations and every flag is in
 # the per-command allowlist below.  Unknown flags fall through to the normal
 # approval prompt, so write-capable options such as `git diff --output=...` are
@@ -387,7 +387,7 @@ def _is_read_only_git_bash(command: str) -> bool:
 def _is_dangerous_rm_target(path: str) -> bool:
     """Return True if *path* is a dangerous target for rm/rmdir.
 
-    Mirrors Claude Code's ``f8f`` function: catches ``/``, home dir,
+    Mirrors Claude Code's rm/rmdir safety checks: catches ``/``, home dir,
     top-level directories, and dangerous globs.
     """
     if path == "*" or path.endswith("/*"):
@@ -663,7 +663,7 @@ def make_can_use_tool(
 ) -> Callable[
     [str, dict[str, Any], ToolPermissionContext], Awaitable[PermissionResult]
 ]:
-    """Create a canUseTool callback for the Claude Agent SDK.
+    """Create a canUseTool callback for OpenCode.
 
     Tools already in allowedTools are handled by the CLI and never reach this
     callback. This handles everything else:
@@ -709,7 +709,7 @@ def make_can_use_tool(
             session" button on a previous out-of-scope approval prompt.
             Membership grants both read and write access — file tools
             (including Edit/Write) are auto-approved silently for paths
-            within these directories, mirroring Claude Code's session-
+            within these directories, matching OpenShrimp's session-
             scoped directory approval.
     """
     static_approved_dirs = [cwd] + (additional_directories or [])
@@ -785,7 +785,7 @@ def make_can_use_tool(
         # Path-scoped approval for file-access tools.
         # - Paths inside session-approved dirs (user explicitly opted in via
         #   the "Allow <dir>/ this session" button) auto-approve for any
-        #   tool, including Edit/Write — mirrors Claude Code's session-
+        #   tool, including Edit/Write, matching OpenShrimp's session-
         #   scoped directory approval.
         # - Read-only tools (Read, Glob, Grep) within static approved dirs
         #   (cwd + additional_directories + chat upload dir) auto-approve.
@@ -859,7 +859,7 @@ def make_can_use_tool(
 
         # Accept-all-edits mode: also auto-approve common safe Bash
         # commands (mkdir, touch, rm, mv, cp, sed, etc.) that complement
-        # file editing.  Mirrors Claude Code's acceptEdits allowlist.
+        # file editing. Mirrors Claude Code's acceptEdits allowlist.
         # Path arguments must resolve to within the approved directories.
         if (
             tool_name == "Bash"

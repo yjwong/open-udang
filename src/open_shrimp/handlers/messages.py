@@ -172,7 +172,7 @@ async def _download_all_attachments(
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming text, photo, and document messages: route to Claude agent.
+    """Handle incoming text, photo, and document messages: route to the agent.
 
     For media groups (albums with multiple photos), messages are batched
     using a short delay so all photos are collected before processing.
@@ -442,7 +442,7 @@ async def _dispatch_to_agent(
     If no task is running, start one.  If a task *is* running and the
     session is already live, inject the message directly via
     ``session.client.query()`` so it is processed at the next tool-call
-    boundary (matching Claude Code's behavior).  If the session is still
+    boundary. If the session is still
     being set up, queue the message for injection once the session is
     ready.
 
@@ -1101,7 +1101,7 @@ async def _start_agent_task(
                     )
                 else:
                     error_text = (
-                        "The Claude process terminated unexpectedly\\. "
+                        "The OpenCode session terminated unexpectedly\\. "
                         "Send a new message to restart the session\\."
                     )
                 await context.bot.send_message(

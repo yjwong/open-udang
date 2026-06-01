@@ -11,7 +11,7 @@ def _ctx() -> ContextConfig:
         directory="/tmp/proj",
         description="test context",
         allowed_tools=[],
-        model="claude-sonnet-4-6",
+        model="gpt-5.5",
     )
 
 
@@ -24,7 +24,7 @@ def test_status_text_renders_native_turn_usage() -> None:
         "cache": {"read": 4_000, "write": 500},
     }
     model_usage = {
-        "claude-sonnet-4-6": {
+        "gpt-5.5": {
             "input": 1_000,
             "output": 200,
             "reasoning": 50,

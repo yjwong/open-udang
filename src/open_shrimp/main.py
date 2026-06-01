@@ -66,7 +66,7 @@ def request_restart() -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="OpenShrimp - Telegram bot for remote Claude access")
+    parser = argparse.ArgumentParser(description="OpenShrimp - Telegram bot for remote OpenCode agent access")
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),

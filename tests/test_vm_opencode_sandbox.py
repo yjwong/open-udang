@@ -116,11 +116,11 @@ def test_lima_mounts_global_skill_dirs(tmp_path, monkeypatch):
 
 
 def test_libvirt_mounts_global_skill_dirs(tmp_path, monkeypatch):
-    claude_skills = tmp_path / ".claude" / "skills"
+    legacy_skills = tmp_path / ".claude" / "skills"
     agents_skills = tmp_path / ".agents" / "skills"
     opencode_skills = tmp_path / ".config" / "opencode" / "skills"
     opencode_skill = tmp_path / ".config" / "opencode" / "skill"
-    for path in (claude_skills, agents_skills, opencode_skills, opencode_skill):
+    for path in (legacy_skills, agents_skills, opencode_skills, opencode_skill):
         path.mkdir(parents=True)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -137,15 +137,15 @@ def test_libvirt_mounts_global_skill_dirs(tmp_path, monkeypatch):
         )
         all_dirs, mount_overrides, readonly_dirs = sandbox._shared_dirs_and_overrides()
 
-    assert str(claude_skills) in all_dirs
+    assert str(legacy_skills) in all_dirs
     assert str(agents_skills) in all_dirs
     assert str(opencode_skills) in all_dirs
     assert str(opencode_skill) in all_dirs
-    assert mount_overrides[str(claude_skills)] == "/home/claude/.claude/skills"
-    assert mount_overrides[str(agents_skills)] == "/home/claude/.agents/skills"
-    assert mount_overrides[str(opencode_skills)] == "/home/claude/.config/opencode/skills"
-    assert mount_overrides[str(opencode_skill)] == "/home/claude/.config/opencode/skill"
-    assert {str(claude_skills), str(agents_skills), str(opencode_skills), str(opencode_skill)} <= readonly_dirs
+    assert mount_overrides[str(legacy_skills)] == "/home/openshrimp/.claude/skills"
+    assert mount_overrides[str(agents_skills)] == "/home/openshrimp/.agents/skills"
+    assert mount_overrides[str(opencode_skills)] == "/home/openshrimp/.config/opencode/skills"
+    assert mount_overrides[str(opencode_skill)] == "/home/openshrimp/.config/opencode/skill"
+    assert {str(legacy_skills), str(agents_skills), str(opencode_skills), str(opencode_skill)} <= readonly_dirs
 
 
 def test_libvirt_ensure_opencode_server_starts_guest_server(tmp_path):
@@ -176,13 +176,13 @@ def test_libvirt_ensure_opencode_server_starts_guest_server(tmp_path):
             conn=object(),
         )
         sandbox._ssh_port = 2222
-        endpoint = sandbox.ensure_opencode_server(provider_id="anthropic")
+        endpoint = sandbox.ensure_opencode_server(provider_id="openai")
 
     assert endpoint.base_url == "http://127.0.0.1:49152"
     assert endpoint.auth_header.startswith("Basic ")
-    sync_auth.assert_called_once_with("anthropic", tmp_path / "opencode-home")
+    sync_auth.assert_called_once_with("openai", tmp_path / "opencode-home")
     assert procs[0].args[:2] == ["ssh", "-p"]
-    assert procs[0].args[-1] == "claude@localhost"
+    assert procs[0].args[-1] == "openshrimp@localhost"
     assert "-L" in procs[0].args
     assert "opencode serve --hostname 127.0.0.1" in procs[1].args[-1]
 
@@ -219,10 +219,10 @@ def test_lima_ensure_opencode_server_uses_internal_tunnel_and_cache(
             "limactl",
             guest_os="linux",
         )
-        first = sandbox.ensure_opencode_server(provider_id="anthropic")
-        second = sandbox.ensure_opencode_server(provider_id="anthropic")
+        first = sandbox.ensure_opencode_server(provider_id="openai")
+        second = sandbox.ensure_opencode_server(provider_id="openai")
         sandbox._opencode_forward.running = False
-        third = sandbox.ensure_opencode_server(provider_id="anthropic")
+        third = sandbox.ensure_opencode_server(provider_id="openai")
 
     assert first is second
     assert third.base_url == "http://127.0.0.1:49153"

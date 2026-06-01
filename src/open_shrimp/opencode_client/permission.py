@@ -1,6 +1,6 @@
 """Bridge OpenCode's async permission events to a synchronous can_use_tool callback.
 
-Anthropic's ``canUseTool`` blocks the SDK while waiting for a decision.
+OpenShrimp's ``canUseTool`` blocks the agent while waiting for a decision.
 OpenCode is event-based: ``permission.asked`` is fired on the SSE bus,
 and the wrapper POSTs back to ``/permission/{id}/reply``. This bridge
 joins the two shapes by:

@@ -78,14 +78,14 @@ class TestRunSetupWizard:
             "/tmp",  # directory
             "test",  # description
             "3",  # model choice (custom)
-            "anthropic/claude-custom-model",  # custom provider/model
+            "openrouter/custom-model",  # custom provider/model
         )
 
         with patch("builtins.input", side_effect=inputs):
             run_setup_wizard(config_path)
 
         raw = yaml.safe_load(config_path.read_text())
-        assert raw["contexts"]["default"]["model"] == "anthropic/claude-custom-model"
+        assert raw["contexts"]["default"]["model"] == "openrouter/custom-model"
 
     def test_ctrl_c_cancels(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"

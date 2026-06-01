@@ -109,7 +109,7 @@ class _DraftState:
     # blockquote ("> Tool: summary").  Used to insert a paragraph break
     # before the next assistant text so it doesn't get swallowed into the
     # notification blockquote.  We track this with a flag instead of
-    # checking raw_text for ">" lines, because Claude's own response text
+    # checking raw_text for ">" lines, because the agent's own response text
     # may also contain blockquotes that should NOT be broken.
     last_was_notification: bool = False
     # Session ID captured as early as possible (from SystemMessage init or
@@ -580,23 +580,23 @@ _ASSISTANT_ERROR_MESSAGES: dict[str, str] = {
         "Run /connect to add or refresh model-provider credentials."
     ),
     "billing_error": (
-        "⚠️ **Billing error.** There is a problem with your Anthropic account billing. "
-        "Please check your account at console.anthropic.com."
+        "⚠️ **Billing error.** There is a billing or account issue with the "
+        "configured model provider."
     ),
     "rate_limit": (
         "⚠️ **Rate limited.** Too many requests — please wait a moment and try again."
     ),
     "invalid_request": (
-        "⚠️ **Invalid request.** The request to Claude was rejected. "
+        "⚠️ **Invalid request.** The model provider rejected the request. "
         "This may indicate a configuration issue."
     ),
     "server_error": (
-        "⚠️ **Server error.** Anthropic's servers returned an error. "
+        "⚠️ **Server error.** The model provider returned an error. "
         "Please try again shortly."
     ),
     "unknown": (
         "⚠️ **Unknown error.** An unexpected error occurred while communicating "
-        "with Claude."
+        "with the model provider."
     ),
 }
 
@@ -819,7 +819,7 @@ async def stream_response(
                             # Ensure a blank line after a tool notification
                             # blockquote so assistant text isn't swallowed
                             # into it.  Only trigger for notifications (tracked
-                            # via flag), NOT for Claude's own blockquote lines.
+                            # via flag), NOT for the agent's own blockquote lines.
                             if state.last_was_notification:
                                 stripped = state.raw_text.rstrip()
                                 state.raw_text = stripped + "\n\n"

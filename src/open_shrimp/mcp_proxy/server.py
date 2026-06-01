@@ -8,8 +8,8 @@ A lightweight Starlette app that exposes two routes:
 * ``ANY /http/{context}/{server}`` — full reverse proxy for HTTP/SSE
   MCP servers (e.g. ``mcp.figma.com``).  Streams request and response
   bodies, propagates ``Mcp-Session-Id`` and SSE event streams, and
-  injects the host's OAuth bearer token from
-  ``~/.claude/.credentials.json`` so credentials never enter the
+  injects the host's OAuth bearer token from the local OpenCode auth store
+  so credentials never enter the
   sandbox.
 
 Runs on a separate listener from the main review/config Starlette app

@@ -1,12 +1,12 @@
 """Scheduled task execution and JobQueue integration for OpenShrimp.
 
-Manages recurring and one-shot Claude prompts that run on a schedule.
-Each scheduled task gets its own isolated Claude session with read-only
+Manages recurring and one-shot agent prompts that run on a schedule.
+Each scheduled task gets its own isolated OpenCode session with read-only
 tools (no approval callbacks, no interactive UI).
 
 Data flow:
   CREATE:
-    Claude ──▶ MCP create_schedule ──▶ validate ──▶ DB INSERT ──▶ JobQueue
+    Agent ──▶ MCP create_schedule ──▶ validate ──▶ DB INSERT ──▶ JobQueue
 
   EXECUTE:
     APScheduler fires ──▶ acquire semaphore ──▶ check context
@@ -269,7 +269,7 @@ async def _execute_task(
     1. Acquires the global semaphore (skips if full).
     2. Checks the task isn't already running (max_instances=1).
     3. Validates the context still exists in config.
-    4. Creates an isolated Claude session with read-only tools.
+    4. Creates an isolated OpenCode session with read-only tools.
     5. Streams results to the originating chat/thread.
     6. Handles timeout and failure notifications.
     7. Auto-deletes one-shot tasks after execution.
@@ -463,7 +463,7 @@ async def _run_scheduled_prompt(
     task: ScheduledTask,
     ctx_config: ContextConfig,
 ) -> None:
-    """Run a Claude prompt for a scheduled task with read-only tools.
+    """Run an agent prompt for a scheduled task with read-only tools.
 
     Creates an isolated session (not shared with interactive sessions),
     sends the prompt, and streams results to the chat.

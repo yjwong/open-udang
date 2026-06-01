@@ -658,7 +658,7 @@ async def _send_approval_keyboard(
         ))
 
     # Out-of-scope file access: offer to approve the entire directory
-    # for the rest of the session (mirrors Claude Code).  Both readers
+    # for the rest of the session. Both readers
     # and editors get the same underlying grant — the wording differs
     # so the button reads naturally per tool family.
     accept_dir_data = ""

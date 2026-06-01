@@ -1,4 +1,4 @@
-"""Read MCP server configurations from ``~/.claude.json``.
+"""Read MCP server configurations from OpenCode config.
 
 Extracts *user-scope* (root ``mcpServers``) and *local-scope*
 (``projects[normalised_path].mcpServers``) stdio server configs so the
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StdioServerConfig:
-    """Parsed stdio MCP server entry from ``~/.claude.json``."""
+    """Parsed stdio MCP server entry from OpenCode config."""
 
     command: str
     args: list[str] = field(default_factory=list)
@@ -29,11 +29,11 @@ class StdioServerConfig:
 
 @dataclass
 class HttpServerConfig:
-    """Parsed HTTP/SSE MCP server entry from ``~/.claude.json``.
+    """Parsed HTTP/SSE MCP server entry from OpenCode config.
 
     ``headers`` carries static headers from the config file.  OAuth
-    credentials are resolved separately at proxy-forwarding time from
-    ``~/.claude/.credentials.json`` so tokens never enter the sandbox.
+    credentials are resolved separately at proxy-forwarding time so tokens
+    never enter the sandbox.
     """
 
     url: str
@@ -45,24 +45,25 @@ class HttpServerConfig:
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def get_claude_config_path() -> Path:
-    """Return the path to the Claude global config file.
+def get_opencode_config_path() -> Path:
+    """Return the path to the OpenCode global config file.
 
-    Respects ``CLAUDE_CONFIG_DIR`` if set, otherwise defaults to
-    ``~/.claude.json``.
+    Respects ``OPENCODE_CONFIG_DIR`` if set, otherwise defaults to
+    ``$XDG_CONFIG_HOME/opencode/opencode.json``.
     """
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    config_dir = os.environ.get("OPENCODE_CONFIG_DIR")
     if config_dir:
-        return Path(config_dir) / ".claude.json"
-    return Path.home() / ".claude.json"
+        return Path(config_dir) / "opencode.json"
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    config_home = Path(xdg_config_home) if xdg_config_home else Path.home() / ".config"
+    return config_home / "opencode" / "opencode.json"
 
 
 def _normalise_path_for_config_key(path: str) -> str:
-    """Normalise *path* to match the key format used in ``~/.claude.json``.
+    """Normalise *path* to match the key format used in OpenCode config.
 
     On Linux/macOS this is equivalent to ``os.path.normpath``.  On Windows
-    backslashes are also converted to forward slashes for parity with the
-    Claude CLI's ``normalizePathForConfigKey``.
+    backslashes are also converted to forward slashes.
     """
     normalised = os.path.normpath(path)
     return normalised.replace("\\", "/")
@@ -78,7 +79,6 @@ _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 def _expand_env_vars(value: str) -> str:
     r"""Expand ``${VAR}`` and ``${VAR:-default}`` in *value*.
 
-    Mirrors the behaviour of the Claude CLI's ``expandEnvVarsInString``.
     Missing variables with no default are left as-is (``${VAR}``).
     """
 
@@ -112,12 +112,12 @@ def _expand_server_args(args: list[str]) -> list[str]:
 # Config loading
 # ---------------------------------------------------------------------------
 
-def load_claude_config() -> dict[str, Any]:
-    """Load and return ``~/.claude.json`` as a dict.
+def load_opencode_config() -> dict[str, Any]:
+    """Load and return OpenCode config as a dict.
 
     Returns an empty dict if the file doesn't exist or can't be parsed.
     """
-    config_path = get_claude_config_path()
+    config_path = get_opencode_config_path()
     if not config_path.is_file():
         return {}
     try:
@@ -149,7 +149,7 @@ def _parse_stdio_servers(
         command = entry.get("command")
         if not command or not isinstance(command, str):
             logger.warning(
-                "MCP server '%s' in ~/.claude.json has no command, skipping", name
+                "MCP server '%s' in OpenCode config has no command, skipping", name
             )
             continue
         raw_args = entry.get("args", [])
@@ -179,7 +179,7 @@ def _parse_http_servers(
         url = entry.get("url")
         if not url or not isinstance(url, str):
             logger.warning(
-                "MCP server '%s' in ~/.claude.json has no url, skipping", name
+                "MCP server '%s' in OpenCode config has no url, skipping", name
             )
             continue
         raw_headers = entry.get("headers", {})
@@ -207,10 +207,10 @@ def _merge_user_and_local(
     """Merge user-scope and local-scope servers for *project_dir*.
 
     User-scope entries come from the root-level ``mcpServers`` in
-    ``~/.claude.json``; local-scope entries come from
+    OpenCode config; local-scope entries come from
     ``projects[normalised_dir].mcpServers`` and win on name conflicts.
     """
-    config = load_claude_config()
+    config = load_opencode_config()
     if not config:
         return {}
 

@@ -24,6 +24,7 @@ from xml.etree import ElementTree as ET
 
 from open_shrimp.config import SandboxConfig
 from open_shrimp.paths import data_dir as _data_dir
+from open_shrimp.sandbox.skill_paths import SANDBOX_HOME, SANDBOX_USER
 
 logger = logging.getLogger(__name__)
 
@@ -292,12 +293,12 @@ def _build_cloud_init_user_data(
             # user-runtime-dir@1000 owns /run/user/1000 as a tmpfs and
             # unmounts it when its refcount drops to zero, taking the
             # Wayland socket with it. Binding to it (plus lingering the
-            # claude user, below) keeps the runtime dir pinned for the
+            # sandbox user, below) keeps the runtime dir pinned for the
             # compositor's entire lifetime.
             "      Requires=seatd.service user-runtime-dir@1000.service\n"
             "      After=seatd.service user-runtime-dir@1000.service\n"
             "      [Service]\n"
-            "      User=claude\n"
+            f"      User={SANDBOX_USER}\n"
             "      SupplementaryGroups=video render input\n"
             "      Environment=WLR_BACKENDS=drm,libinput\n"
             "      Environment=XDG_RUNTIME_DIR=/run/user/1000\n"
@@ -307,9 +308,9 @@ def _build_cloud_init_user_data(
             "      [Install]\n"
             "      WantedBy=multi-user.target\n"
             "  # Minimal labwc config for computer-use.\n"
-            "  # Deferred so the claude user exists when the file is written.\n"
-            "  - path: /home/claude/.config/labwc/rc.xml\n"
-            "    owner: claude:claude\n"
+            "  # Deferred so the sandbox user exists when the file is written.\n"
+            f"  - path: {SANDBOX_HOME}/.config/labwc/rc.xml\n"
+            f"    owner: {SANDBOX_USER}:{SANDBOX_USER}\n"
             "    defer: true\n"
             "    content: |\n"
             '      <?xml version="1.0"?>\n'
@@ -319,15 +320,15 @@ def _build_cloud_init_user_data(
             "        <mouse><default /></mouse>\n"
             "      </labwc_config>\n"
             "  # Chrome autostart (opens after compositor is up).\n"
-            "  - path: /home/claude/.config/labwc/autostart\n"
-            "    owner: claude:claude\n"
+            f"  - path: {SANDBOX_HOME}/.config/labwc/autostart\n"
+            f"    owner: {SANDBOX_USER}:{SANDBOX_USER}\n"
             "    defer: true\n"
             "    permissions: '0755'\n"
             "    content: |\n"
             "      #!/bin/sh\n"
             "      # Start Chrome with Wayland native rendering on virtio-gpu.\n"
             "      google-chrome --ozone-platform=wayland \\\n"
-            "        --user-data-dir=/home/claude/.config/google-chrome-debug \\\n"
+            f"        --user-data-dir={SANDBOX_HOME}/.config/google-chrome-debug \\\n"
             "        --remote-debugging-port=9222 \\\n"
             "        --disable-background-networking \\\n"
             "        --disable-default-apps \\\n"
@@ -411,11 +412,11 @@ def _build_cloud_init_user_data(
             # Node.js for npx (Playwright MCP is fetched on demand).
             "  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -\n"
             "  - apt-get install -y -qq nodejs > /dev/null 2>&1\n"
-            "  - usermod -aG video,render,input claude\n"
+            f"  - usermod -aG video,render,input {SANDBOX_USER}\n"
             # Linger so user-runtime-dir@1000.service starts at boot
             # without an SSH login and survives session churn, keeping
             # /run/user/1000 (and the Wayland socket) pinned.
-            "  - loginctl enable-linger claude\n"
+            f"  - loginctl enable-linger {SANDBOX_USER}\n"
             "  - systemctl enable --now seatd.service\n"
             "  - systemctl enable --now wayland-compositor.service\n"
         )
@@ -423,7 +424,7 @@ def _build_cloud_init_user_data(
     user_data = textwrap.dedent(f"""\
         #cloud-config
         users:
-          - name: claude
+          - name: {SANDBOX_USER}
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
@@ -533,7 +534,7 @@ def ensure_mounts(
 
     def _ssh_run(cmd: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            ["ssh", *ssh_opts, "claude@localhost", "--", cmd],
+            ["ssh", *ssh_opts, f"{SANDBOX_USER}@localhost", "--", cmd],
             capture_output=True,
         )
 
@@ -616,21 +617,21 @@ def ensure_mounts(
         setup_mount_path = textwrap.dedent(f"""\
             mount_path={shlex.quote(mount_path)}
             case "$mount_path" in
-              /home/claude/*)
-                rel=${{mount_path#/home/claude/}}
-                cur=/home/claude
+              {SANDBOX_HOME}/*)
+                rel=${{mount_path#{SANDBOX_HOME}/}}
+                cur={SANDBOX_HOME}
                 while [ -n "$rel" ] && [ "$rel" != "$mount_path" ]; do
                   part=${{rel%%/*}}
                   cur="$cur/$part"
                   sudo mkdir -p "$cur"
-                  sudo chown claude:claude "$cur"
+                  sudo chown {SANDBOX_USER}:{SANDBOX_USER} "$cur"
                   [ "$rel" = "$part" ] && break
                   rel=${{rel#*/}}
                 done
                 ;;
               *)
                 sudo mkdir -p "$mount_path"
-                sudo chown claude:claude "$mount_path"
+                sudo chown {SANDBOX_USER}:{SANDBOX_USER} "$mount_path"
                 ;;
             esac
         """).strip()
@@ -664,7 +665,7 @@ def ensure_persistent_mounts(
 
     def _ssh_run(cmd: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            ["ssh", *ssh_opts, "claude@localhost", "--", cmd],
+            ["ssh", *ssh_opts, f"{SANDBOX_USER}@localhost", "--", cmd],
             capture_output=True,
         )
 
@@ -726,7 +727,7 @@ def ensure_persistent_mounts(
         escaped_content = shlex.quote(unit_content)
         _ssh_run(
             f"sudo mkdir -p {shlex.quote(guest_path)} && "
-            f"sudo chown claude:claude {shlex.quote(guest_path)} && "
+            f"sudo chown {SANDBOX_USER}:{SANDBOX_USER} {shlex.quote(guest_path)} && "
             f"printf '%s' {escaped_content} | sudo tee {shlex.quote(unit_file)} > /dev/null && "
             f"sudo systemctl daemon-reload && "
             f"sudo systemctl enable --now {shlex.quote(unit_name)}"
@@ -1178,7 +1179,7 @@ def wait_for_ssh(
     ssh_key: Path,
     *,
     timeout: int = 60,
-    user: str = "claude",
+    user: str = SANDBOX_USER,
 ) -> bool:
     """Wait for SSH to become available on the VM.
 
@@ -1217,7 +1218,7 @@ def wait_for_cloud_init(
     ssh_key: Path,
     *,
     timeout: int = 600,
-    user: str = "claude",
+    user: str = SANDBOX_USER,
 ) -> bool:
     """Wait for cloud-init to finish inside the VM.
 
@@ -1263,7 +1264,7 @@ def ssh_check_alive(
     ssh_port: int,
     ssh_key: Path,
     *,
-    user: str = "claude",
+    user: str = SANDBOX_USER,
 ) -> bool:
     """Quick check if SSH is reachable."""
     ssh_opts = _ssh_common_opts(ssh_key, ssh_port)

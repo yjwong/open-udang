@@ -61,7 +61,7 @@ _CONTENT_WIDTH = _WINDOW_WIDTH - 2 * _CONTENT_INSET
 
 _MODELS: tuple[tuple[str, str], ...] = (
     ("openai/gpt-5.5", "OpenAI GPT-5.5"),
-    ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet"),
+    ("google/gemini-2.5-pro", "Google Gemini 2.5 Pro"),
 )
 
 # Module-level reference to prevent GC of the active controller.

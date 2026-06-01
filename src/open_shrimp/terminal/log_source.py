@@ -17,18 +17,19 @@ from pathlib import Path
 from open_shrimp import agent_tasks
 from open_shrimp.sandbox import SandboxManager
 from open_shrimp.sandbox.manager import lookup_active_build
+from open_shrimp.sandbox.skill_paths import SANDBOX_HOME, SANDBOX_TMP
 from open_shrimp.handlers.state import is_task_active
 
 logger = logging.getLogger(__name__)
 
-# Task ID pattern: alphanumeric, used by Claude CLI (e.g. "brf4e7jzw")
+# Task ID pattern: alphanumeric task handles from the agent runtime.
 _TASK_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # task_type values that indicate an agent transcript (JSONL format).
 _AGENT_TASK_TYPES = {"local_agent", "remote_agent"}
 
-# Base directory for Claude CLI tmp files
-_CLAUDE_TMP_BASE = Path(f"/tmp/claude-{os.getuid()}")
+# Base directory for agent tmp files.
+_AGENT_TMP_BASE = Path(SANDBOX_TMP.replace("1000", str(os.getuid())))
 
 
 @dataclass
@@ -51,7 +52,7 @@ def _is_file_or_symlink(path: Path) -> bool:
 
 
 def _search_tmp_base(base: Path, filename: str) -> Path | None:
-    """Search a Claude CLI tmp base directory for a task output file.
+    """Search an agent tmp base directory for a task output file.
 
     Looks for ``<base>/<project>/tasks/<filename>`` and
     ``<base>/<project>/<session>/tasks/<filename>``.
@@ -85,24 +86,23 @@ def _resolve_container_symlink(
 ) -> Path | None:
     """Resolve a broken symlink created inside a container/VM to its host path.
 
-    Inside the container/VM, ``/home/claude/.claude`` is mounted from
-    the host.  Agent task ``.output`` files are symlinks to ``.jsonl``
-    session files under ``/home/claude/.claude/projects/…``, which don't
+    Inside the container/VM, OpenCode state is mounted from the host.
+    Agent task ``.output`` files can be symlinks to ``.jsonl``
+    session files under the sandbox home, which don't
     exist on the host at that path.  This function translates the
     container/VM path back to the host equivalent.
 
-    Legacy Docker sandboxes used *context_dir* as the ``.claude`` home, so
-    the relative path resolves directly.
+    The relative path resolves against the sandbox context state directory.
     """
     try:
         target = os.readlink(symlink)
     except OSError:
         return None
 
-    container_prefix = "/home/claude/.claude/"
+    container_prefix = f"{SANDBOX_HOME}/.local/share/opencode/"
     if target.startswith(container_prefix):
         relative = target[len(container_prefix):]
-        # Docker layout: context_dir IS .claude
+        # Docker layout: context_dir owns the sandbox state.
         host_path = context_dir / relative
         if host_path.is_file():
             return host_path
@@ -115,7 +115,7 @@ def _find_task_output_file(
 ) -> Path | None:
     """Find the output file for a background task by ID.
 
-    Searches the host Claude CLI tmp directory and all sandbox managers'
+    Searches the host agent tmp directory and all sandbox managers'
     state directories (where containerized/VM contexts write their tmp files).
 
     For containerized agent tasks the ``.output`` file is a symlink whose
@@ -129,7 +129,7 @@ def _find_task_output_file(
     filename = f"{task_id}.output"
 
     # Search the host tmp directory first.
-    result = _search_tmp_base(_CLAUDE_TMP_BASE, filename)
+    result = _search_tmp_base(_AGENT_TMP_BASE, filename)
     if result:
         return result
 

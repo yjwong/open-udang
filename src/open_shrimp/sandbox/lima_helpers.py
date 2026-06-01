@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from open_shrimp.config import SandboxConfig
 from open_shrimp.paths import data_dir as _data_dir, get_instance_name as _get_instance_name
-from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
+from open_shrimp.sandbox.skill_paths import SANDBOX_TMP, SANDBOX_USER, existing_global_skill_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +381,7 @@ def _build_mounts(
     Path(tmp_dir).mkdir(parents=True, exist_ok=True)
     mounts.append({
         "location": tmp_dir,
-        "mountPoint": "/tmp/claude-1000",
+        "mountPoint": SANDBOX_TMP,
         "writable": True,
     })
 
@@ -415,13 +415,13 @@ def _build_provision_scripts(
     scripts = []
 
     # Base system setup.
-    base_script = textwrap.dedent("""\
+    base_script = textwrap.dedent(f"""\
         #!/bin/bash
         set -eux
 
-        # Create claude user if not exists.
-        id claude &>/dev/null || useradd -m -s /bin/bash -G sudo claude
-        echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude
+        # Create {SANDBOX_USER} user if not exists.
+        id {SANDBOX_USER} &>/dev/null || useradd -m -s /bin/bash -G sudo {SANDBOX_USER}
+        echo '{SANDBOX_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{SANDBOX_USER}
 
         # Enable fstrim for disk space reclamation.
         systemctl enable --now fstrim.timer

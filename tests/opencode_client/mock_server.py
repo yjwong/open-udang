@@ -482,7 +482,7 @@ def step_started(message_id: str, model_id: str) -> dict[str, Any]:
                 "id": message_id,
                 "role": "assistant",
                 "modelID": model_id,
-                "providerID": "anthropic",
+                "providerID": "openai",
                 "cost": 0,
                 "tokens": {
                     "input": 0, "output": 0, "reasoning": 0,
@@ -513,7 +513,7 @@ def step_ended(
                 "id": message_id,
                 "role": "assistant",
                 "modelID": model_id,
-                "providerID": "anthropic",
+                "providerID": "openai",
                 "cost": cost,
                 "tokens": {
                     "input": input,
@@ -543,7 +543,7 @@ def step_failed(
                 "id": message_id,
                 "role": "assistant",
                 "modelID": model_id,
-                "providerID": "anthropic",
+                "providerID": "openai",
                 "cost": 0,
                 "tokens": {
                     "input": 0, "output": 0, "reasoning": 0,

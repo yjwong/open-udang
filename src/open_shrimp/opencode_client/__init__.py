@@ -1,4 +1,4 @@
-"""OpenCode wrapper, surface-compatible with the Anthropic SDK where possible."""
+"""OpenCode wrapper used by OpenShrimp."""
 
 from open_shrimp.opencode_client.client import OpenCodeClient
 from open_shrimp.opencode_client.errors import (

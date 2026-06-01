@@ -99,8 +99,7 @@ _tool_approved_sessions: dict[tuple[ChatScope, str], list[ApprovalRule]] = {}
 # Session-approved directories: paths the user explicitly opted into via the
 # "Allow <reading from|all edits in> <dir>/ this session" button on an
 # out-of-scope file approval prompt.  Membership grants both read AND write
-# access for the rest of the session (mirrors Claude Code's directory-scoped
-# session approval).  Cleared on /clear or context switch.
+# access for the rest of the session. Cleared on /clear or context switch.
 # ---------------------------------------------------------------------------
 _session_approved_dirs: dict[tuple[ChatScope, str], set[str]] = {}
 
@@ -255,7 +254,7 @@ _resume_page_cache: dict[str, tuple[str, int]] = {}
 # Constants
 # ---------------------------------------------------------------------------
 
-# Default context window for all Claude models via the Agent SDK (no 1M beta header).
+# Default context window used when the configured model limit is unknown.
 _DEFAULT_CONTEXT_LIMIT = 200_000
 
 # Status emoji map for MCP server connection status.

@@ -71,16 +71,23 @@ from open_shrimp.sandbox.docker import (
     _wait_for_opencode_ready,
 )
 from open_shrimp.sandbox.docker_helpers import OPENCODE_GUEST_PORT
-from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
+from open_shrimp.sandbox.skill_paths import (
+    SANDBOX_HOME,
+    SANDBOX_TMP,
+    SANDBOX_UID,
+    SANDBOX_USER,
+    existing_global_skill_dirs,
+)
 
 logger = logging.getLogger(__name__)
 
 # Graceful shutdown timeout before falling back to destroy.
 _SHUTDOWN_TIMEOUT = 180
 
-# UID of the ``claude`` user inside the VM.  Cloud-init creates it as the
+# UID of the sandbox user inside the VM. Cloud-init creates it as the
 # first non-system user, which gets UID 1000 on Ubuntu.
-_VM_CLAUDE_UID = 1000
+_VM_SANDBOX_UID = SANDBOX_UID
+_VM_SSH_TARGET = f"{SANDBOX_USER}@localhost"
 
 
 def _tail_file(
@@ -550,7 +557,7 @@ class LibvirtSandbox:
 
         for name, binary in binaries.items():
             result = subprocess.run(
-                ["ssh", *ssh_opts, "claude@localhost", "which", name],
+                ["ssh", *ssh_opts, _VM_SSH_TARGET, "which", name],
                 capture_output=True,
             )
             if result.returncode == 0:
@@ -561,7 +568,7 @@ class LibvirtSandbox:
                 [
                     "scp", *scp_opts,
                     str(binary),
-                    f"claude@localhost:/tmp/{name}",
+                    f"{_VM_SSH_TARGET}:/tmp/{name}",
                 ],
                 check=True,
                 capture_output=True,
@@ -569,7 +576,7 @@ class LibvirtSandbox:
             subprocess.run(
                 [
                     "ssh", *ssh_opts,
-                    "claude@localhost",
+                    _VM_SSH_TARGET,
                     "--",
                     f"sudo mv /tmp/{name} /usr/local/bin/{name} && "
                     f"sudo chmod +x /usr/local/bin/{name}",
@@ -610,7 +617,7 @@ class LibvirtSandbox:
         forward_cmd = [
             "ssh", *ssh_opts, *SSH_TUNNEL_OPTS,
             "-L", f"127.0.0.1:{host_port}:127.0.0.1:{OPENCODE_GUEST_PORT}",
-            "claude@localhost",
+            _VM_SSH_TARGET,
         ]
         forward = subprocess.Popen(
             forward_cmd,
@@ -633,13 +640,13 @@ class LibvirtSandbox:
 
         remote_cmd = (
             f"cd {shlex.quote(self._project_dir)} && "
-            "HOME=/home/claude "
+            f"HOME={SANDBOX_HOME} "
             f"OPENCODE_SERVER_PASSWORD={shlex.quote(password)} "
             "opencode serve --hostname 127.0.0.1 "
             f"--port {OPENCODE_GUEST_PORT} --print-logs"
         )
         proc = subprocess.Popen(
-            ["ssh", *ssh_opts, "claude@localhost", remote_cmd],
+            ["ssh", *ssh_opts, _VM_SSH_TARGET, remote_cmd],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -803,7 +810,7 @@ class LibvirtSandbox:
         ssh_opts = _ssh_common_opts(ssh_key, self._ssh_port)
         result = subprocess.run(
             [
-                "ssh", *ssh_opts, "claude@localhost",
+                "ssh", *ssh_opts, _VM_SSH_TARGET,
                 "env", "XDG_RUNTIME_DIR=/run/user/1000",
                 "WAYLAND_DISPLAY=wayland-0",
                 "wl-paste", "--no-newline", "--primary",
@@ -839,7 +846,7 @@ class LibvirtSandbox:
             ' rm "$tmpf"'
         )
         result = subprocess.run(
-            ["ssh", *ssh_opts, "claude@localhost", remote_cmd],
+            ["ssh", *ssh_opts, _VM_SSH_TARGET, remote_cmd],
             input=text,
             capture_output=True,
             text=True,
@@ -866,7 +873,7 @@ class LibvirtSandbox:
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
-            "claude@localhost",
+            _VM_SSH_TARGET,
             "mkdir", "-p", upload_dir,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
@@ -890,7 +897,7 @@ class LibvirtSandbox:
                 "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "LogLevel=ERROR",
                 str(host_path),
-                f"claude@localhost:{vm_path}",
+                f"{_VM_SSH_TARGET}:{vm_path}",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -935,7 +942,7 @@ class LibvirtSandbox:
             *_ssh_common_opts(self._sdir / "ssh_key", self._ssh_port),
             *SSH_TUNNEL_OPTS,
             "-L", f"127.0.0.1:{host_port}:127.0.0.1:{guest_port}",
-            "claude@localhost",
+            _VM_SSH_TARGET,
         ]
         return open_ssh_tunnel(
             cmd,
@@ -976,8 +983,8 @@ class LibvirtSandbox:
         all_dirs.append(str(self._tmp_dir))
         all_dirs.append(str(self._opencode_home_dir))
         mount_overrides = {
-            str(self._tmp_dir): f"/tmp/claude-{_VM_CLAUDE_UID}",
-            str(self._opencode_home_dir): "/home/claude/.local/share/opencode",
+            str(self._tmp_dir): SANDBOX_TMP,
+            str(self._opencode_home_dir): f"{SANDBOX_HOME}/.local/share/opencode",
         }
         readonly_dirs: set[str] = set()
         for host_skills, guest_skills in existing_global_skill_dirs():

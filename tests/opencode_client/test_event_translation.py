@@ -336,10 +336,10 @@ async def test_step_ended_populates_usage_and_model_usage(
         mock_server.script(
             sid,
             [
-                step_started("msg1", "claude-sonnet-4-6"),
+                step_started("msg1", "gpt-5.5"),
                 text_delta("p1", "hello"),
                 step_ended(
-                    "msg1", "claude-sonnet-4-6",
+                    "msg1", "gpt-5.5",
                     input=100, output=20, reasoning=5,
                     cache_read=200, cache_write=50, cost=0.01,
                 ),
@@ -364,7 +364,7 @@ async def test_step_ended_populates_usage_and_model_usage(
     assert result.is_error is False
     assert result.total_cost_usd == pytest.approx(0.01)
     assert result.model_usage == {
-        "claude-sonnet-4-6": {
+        "gpt-5.5": {
             "input": 100,
             "output": 20,
             "reasoning": 5,
@@ -424,9 +424,9 @@ async def test_step_failed_surfaces_error_string(
         mock_server.script(
             sid,
             [
-                step_started("msg1", "claude-sonnet-4-6"),
+                step_started("msg1", "gpt-5.5"),
                 step_failed(
-                    "msg1", "claude-sonnet-4-6",
+                    "msg1", "gpt-5.5",
                     "Prompt is too long", completed=123,
                 ),
                 session_idle(),

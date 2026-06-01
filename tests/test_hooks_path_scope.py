@@ -1,11 +1,11 @@
 """Tests for path-scoped tool approval and session-approved-dirs in hooks.py.
 
-Covers the "Claude-Code-style" UX:
+Covers the OpenShrimp approval UX:
 - Out-of-scope path-tool calls always prompt; blanket "Approve all <Tool>"
   rules cannot bypass the directory boundary.
 - Paths within session-approved dirs auto-approve for any tool, including
   the mutating ones (Edit/Write).
-- The suggested directory passed to ``request_approval`` matches Claude
+- The suggested directory passed to ``request_approval`` matches the
   Code's parent-of-file granularity.
 """
 
@@ -121,7 +121,7 @@ class TestMakeCanUseToolPathScope:
         result = await can_use("Read", {"filePath": str(target)}, _ctx())
         assert isinstance(result, PermissionResultAllow)
         request_approval.assert_awaited_once()
-        # Suggested dir is the parent of the file (Claude Code parity).
+        # Suggested dir is the parent of the file.
         args = request_approval.await_args.args
         assert args[0] == "Read"
         assert args[2] == "tu_1"

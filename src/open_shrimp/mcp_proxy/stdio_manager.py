@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # 16 MiB — generous limit for MCP responses (e.g. large database query
 # results).  Python's asyncio StreamReader defaults to 64 KiB which is
-# far too small.  Bun (used by Claude Code) has no such limit.
+# far too small. Bun's default is higher, so this preserves comparable headroom.
 _STDOUT_BUFFER_LIMIT = 16 * 1024 * 1024
 
 

@@ -21,7 +21,7 @@ def split_provider_model(model: str | None) -> tuple[str, str]:
     if "/" not in model:
         raise ValueError(
             f"context.model {model!r} must be 'provider/model' "
-            f"(e.g. 'openai/gpt-5', 'anthropic/claude-sonnet-4-6')"
+            f"(e.g. 'openai/gpt-5.5', 'google/gemini-2.5-pro')"
         )
     provider, _, rest = model.partition("/")
     return provider, rest
@@ -46,7 +46,7 @@ class OpenCodeOptions:
     ) = None
     system_prompt: str | dict[str, Any] | None = None  # → system on prompt_async
 
-    # Accepted-but-ignored fields (kwargs-compat with ClaudeAgentOptions).
+    # Accepted-but-ignored fields for older OpenShrimp call sites.
     setting_sources: list[str] | None = None
     include_partial_messages: bool = True
     max_buffer_size: int | None = None

@@ -31,7 +31,7 @@ def _make_config() -> Config:
             "default": ContextConfig(
                 directory="/tmp/test-repo",
                 description="Test context",
-                model="claude-sonnet-4-6",
+                model="gpt-5.5",
                 allowed_tools=[],
             ),
         },

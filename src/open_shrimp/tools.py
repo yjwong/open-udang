@@ -367,7 +367,7 @@ def create_openshrimp_tools(
         tools.extend([
             OpenShrimpTool(
                 "create_schedule",
-                "Create a scheduled task that runs a Claude prompt automatically in the current chat/thread.",
+                "Create a scheduled task that runs an agent prompt automatically in the current chat/thread.",
                 {
                     "type": "object",
                     "properties": {

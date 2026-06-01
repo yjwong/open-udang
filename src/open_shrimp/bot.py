@@ -273,7 +273,7 @@ async def run_bot(
         BotCommand("context", "List or switch contexts"),
         BotCommand("clear", "Start a fresh session"),
         BotCommand("status", "Show current context, session, and state"),
-        BotCommand("cancel", "Abort running Claude invocation"),
+        BotCommand("cancel", "Abort running agent invocation"),
         BotCommand("resume", "List and resume a previous session"),
         BotCommand("review", "Review and stage git changes"),
         BotCommand("mcp", "List and manage MCP servers"),
@@ -368,7 +368,7 @@ async def run_bot(
             "Install python-telegram-bot[job-queue] to enable."
         )
 
-    # Start idle-session sweep so dangling Claude processes get reaped.
+    # Start idle-session sweep so dangling OpenCode sessions get reaped.
     start_idle_sweep()
 
     # Register auto-update checker.

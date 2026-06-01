@@ -20,7 +20,7 @@ from open_shrimp.config import SandboxConfig
 from open_shrimp.sandbox.lima_helpers import (
     _run_limactl,
 )
-from open_shrimp.sandbox.skill_paths import existing_global_skill_dirs
+from open_shrimp.sandbox.skill_paths import SANDBOX_TMP, existing_global_skill_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def _build_mounts_macos(
     Path(tmp_dir).mkdir(parents=True, exist_ok=True)
     mounts.append({
         "location": tmp_dir,
-        "mountPoint": "/tmp/claude-1000",
+        "mountPoint": SANDBOX_TMP,
         "writable": True,
     })
 

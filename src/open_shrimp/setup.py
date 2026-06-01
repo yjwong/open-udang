@@ -30,7 +30,7 @@ def _path_completer(text: str, state: int) -> str | None:
 
 _MODELS: tuple[tuple[str, str], ...] = (
     ("openai/gpt-5.5", "OpenAI GPT-5.5"),
-    ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet"),
+    ("google/gemini-2.5-pro", "Google Gemini 2.5 Pro"),
 )
 
 def _prompt(

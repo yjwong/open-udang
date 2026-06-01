@@ -1,4 +1,4 @@
-"""OpenShrimp-owned compatibility implementation of Claude Code's Agent tool."""
+"""OpenShrimp-owned implementation of the Agent tool."""
 
 from __future__ import annotations
 

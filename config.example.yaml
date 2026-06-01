@@ -31,20 +31,18 @@ contexts:
       # If you add them to allowed_tools, they bypass the path check entirely
       # and the agent can access any file the process can read.
       #
-      # Patterns are supported — these are passed to the Claude CLI as --allowedTools
+      # Patterns are supported and passed to OpenCode's permission rules.
       # - "Bash(git *)"        # allow all git commands
     # additional_directories:
     #   - /home/you/Documents/shared-lib  # Extra dirs the agent can access
     #   - /home/you/Documents/api-service
-    #   # These are passed to the SDK as add_dirs (equivalent to --add-dir).
+    #   # These are passed to OpenCode as additional external-directory rules.
     #   # Path-scoped auto-approval (Read, Glob, Grep) extends to these dirs.
-    #   # The project's .claude/settings.json additionalDirectories are also
-    #   # respected via setting_sources=["project"] (inherited by default).
     # default_for_chats:
     #   - -1001234567890  # Sets initial context for this group chat
     # locked_for_chats:
     #   - -1001234567890  # Locks this group chat to this context (cannot switch)
-    # sandbox:                     # Run the Claude CLI in an isolated sandbox.
+    # sandbox:                     # Run OpenCode in an isolated sandbox.
     #   backend: docker            # "docker" (Linux), "libvirt" (Linux VM), or "lima" (macOS VM)
     #                              # Provides strong filesystem isolation — the agent
     #                              # can only access the project directory and its
@@ -69,7 +67,7 @@ contexts:
     #                              # Use sparingly — defeats the sandbox boundary.
     #   computer_use: true         # Enable GUI interaction (computer use).
     #                              # Runs a desktop environment inside the sandbox.
-    #                              # Claude can take screenshots, click, type, scroll,
+    #                              # The agent can take screenshots, click, type, scroll,
     #                              # and switch windows via MCP tools. A VNC server
     #                              # is exposed for observability (check /status).
     #   # Lima backend (macOS only) — full VM isolation via Apple Virtualization.framework:

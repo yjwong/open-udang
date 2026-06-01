@@ -77,7 +77,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lines = [
         "👋 *Welcome to OpenShrimp*",
         "",
-        "You're connected to Claude. Just send a message (or voice note) — no command needed.",
+        "You're connected to OpenShrimp. Just send a message (or voice note) — no command needed.",
         "",
         f"*Working in:* `{ctx_name}` → `{ctx.directory}`",
         "",
@@ -421,7 +421,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /cancel command: abort running Claude invocation."""
+    """Handle /cancel command: abort running agent invocation."""
     config: Config = context.bot_data["config"]
     message = update.effective_message
     if not message or not _is_authorized(update.effective_user and update.effective_user.id, config):
@@ -1613,7 +1613,7 @@ async def schedule_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     tasks = await list_scheduled_tasks(db, scope)
     if not tasks:
         await message.reply_text(
-            "No scheduled tasks\\. Ask Claude to create one\\!",
+            "No scheduled tasks\\. Ask OpenShrimp to create one\\!",
             parse_mode="MarkdownV2",
         )
         return

@@ -1,7 +1,7 @@
-"""Persistent Claude Agent SDK client manager for OpenShrimp.
+"""Persistent OpenCode client manager for OpenShrimp.
 
-Manages long-lived ClaudeSDKClient instances keyed by ChatScope, so the CLI
-subprocess stays alive across multiple messages in the same conversation.
+Manages long-lived OpenCodeClient instances keyed by ChatScope, so the agent
+session stays alive across multiple messages in the same conversation.
 This avoids the "Continue from where you left off." injection that the CLI
 performs when it detects an interrupted turn on session resume.
 
@@ -69,7 +69,7 @@ class CallbackContext:
 
 @dataclass
 class AgentSession:
-    """A long-lived SDK client associated with a chat scope."""
+    """A long-lived OpenCode client associated with a chat scope."""
 
     client: OpenCodeClient
     session_id: str | None = None
@@ -118,7 +118,7 @@ async def get_or_create_session(
 
     If a session already exists for *scope* with the same context,
     return it (after updating the callback context).  Otherwise create a
-    fresh ``ClaudeSDKClient``, connect, and store it.
+    fresh ``OpenCodeClient``, connect, and store it.
 
     Args:
         scope: ChatScope identifying the chat/thread.

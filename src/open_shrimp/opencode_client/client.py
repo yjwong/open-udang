@@ -305,7 +305,7 @@ class OpenCodeClient:
                 )
 
     async def get_mcp_status(self) -> dict[str, Any]:
-        """Return MCP status in the Claude-compatible handler shape."""
+        """Return MCP status in the handler shape used by command handlers."""
         if self._http is None:
             raise CLIConnectionError("OpenCodeClient.get_mcp_status called before connect()")
         params: dict[str, str] = {}
@@ -895,7 +895,7 @@ def _coerce_mcp_config(name: str, raw_config: Any) -> dict[str, Any]:
 def _coerce_system_prompt(value: Any) -> str:
     """Normalise ``options.system_prompt`` into a string for OpenCode.
 
-    Anthropic accepts a string OR a ``{"type": "preset", "preset": …,
+    Older callers may pass a string OR a ``{"type": "preset", "preset": …,
     "append": …}`` dict. OpenCode's ``system`` field is a plain
     appendable string, so we pull out the ``append`` text when given
     the preset shape and ignore the rest.

@@ -5,12 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "open-shrimp"
 dynamic = ["version"]
-description = "Telegram bot for remote Claude access via the Agent SDK"
+description = "Telegram bot for remote OpenCode agent access"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
-    "claude-agent-sdk",
     "python-telegram-bot[httpx,job-queue]",
     "aiosqlite",
     "pyyaml",

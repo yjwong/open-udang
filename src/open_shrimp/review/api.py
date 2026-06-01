@@ -752,7 +752,7 @@ async def commit_endpoint(request: Request) -> JSONResponse:
 
 
 async def submit_comments_endpoint(request: Request) -> JSONResponse:
-    """POST /api/review/submit-comments — send review comments to Claude.
+    """POST /api/review/submit-comments — send review comments to the agent.
 
     Expects JSON body::
 
@@ -770,7 +770,7 @@ async def submit_comments_endpoint(request: Request) -> JSONResponse:
         }
 
     Builds a structured prompt from the comments and dispatches it to the
-    Claude agent for the given chat.
+    agent for the given chat.
     """
     try:
         user_id = await _authenticate(request)
