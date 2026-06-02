@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-The Lima sandbox runs Claude inside a full virtual machine on macOS, using Apple's Virtualization.framework. Like the Libvirt sandbox, it provides strong isolation — the agent has no access to your host filesystem beyond the shared project directory.
+The Lima sandbox runs OpenCode inside a full virtual machine on macOS, using Apple's Virtualization.framework. Like the Libvirt sandbox, it provides strong isolation — the agent has no access to your host filesystem beyond the shared project directory.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ On first use, OpenShrimp will:
 1. Download `limactl` to `~/Library/Application Support/openshrimp/bin/`
 2. Download an Ubuntu 24.04 cloud image
 3. Create and boot a VM (takes ~30 seconds on first boot)
-4. Install the Claude CLI inside the VM
+4. Install and start the OpenCode server inside the VM
 
 Subsequent messages reuse the running VM with no boot delay.
 
@@ -83,7 +83,7 @@ Both directories are available at their original paths inside the VM.
 
 ## File uploads
 
-When you send files to the bot (photos, documents), they're copied into the VM via `limactl copy` and placed in `/tmp/openshrimp-uploads`. Claude can then read and work with them.
+When you send files to the bot (photos, documents), they're copied into the VM via `limactl copy` and placed in `/tmp/openshrimp-uploads`. The agent can then read and work with them.
 
 ## Performance
 

@@ -93,29 +93,29 @@ You cannot specify both `container` and `sandbox` on the same context. The `cont
 
 ### `allowed_tools`
 
-Tools listed here are passed to the Claude CLI as `--allowedTools` and are always approved without prompting. Glob patterns are supported:
+Tools listed here become OpenCode permission rules and are always approved without prompting. Command patterns are supported:
 
 ```yaml
 allowed_tools:
   - LSP
-  - "Bash(git *)"        # allow all git commands
-  - "Bash(npm test)"     # allow npm test specifically
+  - "bash(git *)"        # allow all git commands
+  - "bash(npm test)"     # allow npm test specifically
 ```
 
 Tools **not** in this list go through OpenShrimp's path-scoped approval:
 
-- **Read, Glob, Grep** — auto-approved when the target path is within the context directory (or `additional_directories`)
-- **Edit, Write** — always require manual approval via Telegram inline keyboard, with an option to "Accept all edits" for the session
-- **Bash** — requires approval; you can approve by command prefix (e.g. "Accept all `git`") or blanket-approve the entire tool
+- **read, glob, grep** — auto-approved when the target path is within the context directory (or `additional_directories`)
+- **edit, write, apply_patch** — always require manual approval via Telegram inline keyboard, with an option to "Accept all edits" for the session
+- **bash** — requires approval; you can approve by command prefix (e.g. "Accept all `git`") or blanket-approve the entire tool
 - Paths outside the context directory always require manual approval
 
 :::caution
-Adding `Read`, `Write`, `Edit`, `Glob`, or `Grep` to `allowed_tools` bypasses path checking entirely — the agent can access any file the process can read.
+Adding `read`, `write`, `edit`, `glob`, or `grep` to `allowed_tools` bypasses path checking entirely — the agent can access any file the process can read.
 :::
 
 ### `additional_directories`
 
-Extra directories passed to the SDK as `--add-dir`. Path-scoped auto-approval (Read, Glob, Grep) extends to these directories.
+Extra directories the agent can access outside the context directory. OpenShrimp extends path-scoped auto-approval for `read`, `glob`, and `grep` to these directories.
 
 ```yaml
 additional_directories:
@@ -144,7 +144,7 @@ Chat IDs for groups are negative numbers. You can find them from the bot's logs 
 
 ## `contexts.<name>.sandbox`
 
-Run OpenCode inside an isolated environment. When a sandbox is enabled, all Bash commands and path-scoped tools are auto-approved since the sandbox provides the safety boundary.
+Run OpenCode inside an isolated environment. When a sandbox is enabled, all bash commands and path-scoped tools are auto-approved since the sandbox provides the safety boundary.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -212,7 +212,7 @@ See the [Lima Sandbox guide](/guides/lima-sandbox/) for detailed setup instructi
 
 ### Computer use
 
-When `computer_use: true` is set, the sandbox runs a headless Wayland desktop (labwc compositor, 1280x720) with Chromium and a foot terminal. Claude interacts via MCP tools: `computer_screenshot`, `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, and `computer_toplevel`.
+When `computer_use: true` is set, the sandbox runs a headless Wayland desktop (labwc compositor, 1280x720) with Chromium and a foot terminal. The agent interacts via MCP tools: `openshrimp_computer_screenshot`, `openshrimp_computer_click`, `openshrimp_computer_type`, `openshrimp_computer_key`, `openshrimp_computer_scroll`, and `openshrimp_computer_toplevel`.
 
 A VNC server is exposed for live viewing — use `/vnc` to open the noVNC viewer.
 
@@ -281,7 +281,7 @@ contexts:
     model: openai/gpt-5.5
     allowed_tools:
       - LSP
-      - "Bash(npm *)"
+      - "bash(npm *)"
     additional_directories:
       - /home/you/Documents/shared-components
     sandbox:

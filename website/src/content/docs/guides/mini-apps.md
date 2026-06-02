@@ -49,7 +49,7 @@ If your context has `additional_directories`, you'll see one button per director
 
 ## Terminal App
 
-The Terminal App shows output from background Bash tasks. When Claude runs a Bash command with `run_in_background`, the tool result message includes a "View output" button that opens the terminal viewer.
+The Terminal App shows output from background bash tasks. When the agent runs a bash command with `run_in_background`, the tool result message includes a "View output" button that opens the terminal viewer.
 
 The viewer:
 
@@ -57,7 +57,7 @@ The viewer:
 - Streams new output in real time via Server-Sent Events (SSE)
 - Uses xterm.js for proper terminal rendering (colors, cursor positioning, etc.)
 
-Task output files are stored under `/tmp/claude-<uid>/` and discovered automatically.
+Task output files are discovered from OpenShrimp's background task log sources and opened automatically.
 
 ## VNC App
 
@@ -67,13 +67,13 @@ The VNC App provides a live view of the desktop in [computer-use](/guides/comput
 /vnc
 ```
 
-It uses noVNC to connect through a WebSocket-to-TCP proxy to the sandbox's VNC server. You can watch Claude interact with the desktop in real time, or take over and interact manually.
+It uses noVNC to connect through a WebSocket-to-TCP proxy to the sandbox's VNC server. You can watch the agent interact with the desktop in real time, or take over and interact manually.
 
 Only available when the context has `computer_use: true` and the sandbox is running.
 
 ## Markdown Preview App
 
-The Markdown Preview App renders markdown content in a formatted view. When Claude sends a file via the `send_file` MCP tool and the file is a Markdown file, a "Preview" button is attached that opens the rendered preview.
+The Markdown Preview App renders markdown content in a formatted view. When the agent sends a file via the `openshrimp_send_file` MCP tool and the file is a Markdown file, a "Preview" button is attached that opens the rendered preview.
 
 This uses an ephemeral content store — previews are temporary and not persisted.
 

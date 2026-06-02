@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-The Libvirt/QEMU sandbox runs Claude inside a full virtual machine. This provides the strongest isolation — the agent has no access to your host filesystem beyond the shared project directory.
+The Libvirt/QEMU sandbox runs OpenCode inside a full virtual machine. This provides the strongest isolation — the agent has no access to your host filesystem beyond the shared project directory.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ contexts:
 2. **Overlay disk** — A qcow2 copy-on-write overlay is created for each context, preserving the base image
 3. **Cloud-init** — SSH keys and provisioning scripts are injected via cloud-init
 4. **Directory sharing** — Your project directory is shared into the VM via virtiofs (preferred) or 9p
-5. **SSH connection** — OpenShrimp connects via SSH to run the Claude CLI inside the VM
+5. **OpenCode server** — OpenShrimp connects to the VM and starts `opencode serve` inside it
 
 ## VM configuration
 

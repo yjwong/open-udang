@@ -1,11 +1,11 @@
 ---
 title: Scheduled Tasks
-description: Set up cron-like recurring and one-shot Claude prompts that run automatically.
+description: Set up cron-like recurring and one-shot agent prompts that run automatically.
 sidebar:
   order: 7
 ---
 
-Scheduled tasks let you set up recurring or one-shot Claude prompts that run on a schedule. Describe what you want in natural language, and Claude creates the schedule using MCP tools.
+Scheduled tasks let you set up recurring or one-shot agent prompts that run on a schedule. Describe what you want in natural language, and the agent creates the schedule using MCP tools.
 
 ## Creating a task
 
@@ -13,7 +13,7 @@ Just tell the bot what you want scheduled:
 
 > Check the deployment status every 30 minutes and tell me if anything is failing.
 
-Claude will call the `create_schedule` MCP tool to set it up. You'll get a confirmation with the task name, schedule, and context.
+The agent will call the `openshrimp_create_schedule` MCP tool to set it up. You'll get a confirmation with the task name, schedule, and context.
 
 You can also be more specific:
 
@@ -56,11 +56,11 @@ Runs once at a specific time, then auto-deletes:
 
 Scheduled tasks run in isolated sessions with read-only tools:
 
-- **Read, Glob, Grep** — explore the codebase
-- **WebSearch, WebFetch** — access the web
-- **Bash** — only if the context has a sandbox enabled
+- **read, glob, grep** — explore the codebase
+- **webfetch** — access the web
+- **bash** — only if the context has a sandbox enabled
 
-Tasks cannot use mutating tools (Edit, Write) or interactive approval — they run unattended.
+Tasks cannot use mutating tools (`edit`, `write`, `apply_patch`) or interactive approval — they run unattended.
 
 ## Limits and safety
 
@@ -86,7 +86,7 @@ Shows all scheduled tasks for the current chat with their name, schedule, contex
 
 ### Delete a task
 
-Ask Claude:
+Ask the agent:
 
 > Delete the deployment check schedule.
 

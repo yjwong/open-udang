@@ -1,22 +1,22 @@
 ---
 title: MCP Servers
-description: Manage Model Context Protocol servers that extend Claude's capabilities.
+description: Manage Model Context Protocol servers that extend the agent's capabilities.
 sidebar:
   order: 11
 ---
 
-MCP (Model Context Protocol) servers extend Claude's capabilities with additional tools. OpenShrimp inherits MCP server configuration from your Claude CLI settings and provides commands to manage them.
+MCP (Model Context Protocol) servers extend the agent's capabilities with additional tools. OpenShrimp exposes its own MCP tools and can merge user MCP servers from OpenCode global config plus per-context `mcp:` entries in `config.yaml`.
 
 ## How MCP servers work
 
-MCP servers are external processes that provide tools to Claude via the Model Context Protocol. Examples include:
+MCP servers are external processes that provide tools to the agent via the Model Context Protocol. Examples include:
 
 - GitHub integration (create PRs, read issues)
 - Slack messaging
 - Database access
 - Custom project-specific tools
 
-Claude discovers available tools from connected MCP servers and can call them during conversations.
+The agent discovers available tools from connected MCP servers and can call them during conversations.
 
 ## Viewing MCP servers
 
@@ -68,12 +68,26 @@ Re-enable a previously disabled server:
 
 ## Configuration
 
-MCP servers are configured in your Claude CLI settings, not in OpenShrimp's config. They're typically defined in:
+MCP servers can be configured globally in OpenCode or per context in OpenShrimp's `config.yaml`:
 
-- `~/.claude/settings.json` — global settings
-- `<project>/.claude/settings.json` — per-project settings
+```yaml
+contexts:
+  myproject:
+    directory: /home/you/Documents/myproject
+    description: "My project"
+    allowed_tools:
+      - LSP
+    mcp:
+      github:
+        type: local
+        command:
+          - npx
+          - -y
+          - '@modelcontextprotocol/server-github'
+        enabled: true
+```
 
-OpenShrimp respects both global and project-level MCP server configurations. The servers available depend on which context you're in.
+The servers available depend on which context you're in. Use `/clear` after changing MCP config so the next session starts with the updated tool list.
 
 ## Built-in MCP tools
 
@@ -81,17 +95,17 @@ OpenShrimp registers its own MCP server (`openshrimp`) that provides:
 
 | Tool | Description |
 |------|-------------|
-| `send_file` | Send files to Telegram (photos, documents) |
-| `edit_topic` | Set forum topic title and icon (forum topics only) |
-| `create_schedule` | Create a scheduled task |
-| `list_schedules` | List scheduled tasks |
-| `delete_schedule` | Delete a scheduled task |
-| `computer_screenshot` | Take a screenshot (computer-use contexts only) |
-| `computer_click` | Click at coordinates (computer-use contexts only) |
-| `computer_type` | Type text (computer-use contexts only) |
-| `computer_key` | Press keys (computer-use contexts only) |
-| `computer_scroll` | Scroll (computer-use contexts only) |
-| `computer_toplevel` | Focus a window (computer-use contexts only) |
+| `openshrimp_send_file` | Send files to Telegram (photos, documents) |
+| `openshrimp_edit_topic` | Set forum topic title and icon (forum topics only) |
+| `openshrimp_create_schedule` | Create a scheduled task |
+| `openshrimp_list_schedules` | List scheduled tasks |
+| `openshrimp_delete_schedule` | Delete a scheduled task |
+| `openshrimp_computer_screenshot` | Take a screenshot (computer-use contexts only) |
+| `openshrimp_computer_click` | Click at coordinates (computer-use contexts only) |
+| `openshrimp_computer_type` | Type text (computer-use contexts only) |
+| `openshrimp_computer_key` | Press keys (computer-use contexts only) |
+| `openshrimp_computer_scroll` | Scroll (computer-use contexts only) |
+| `openshrimp_computer_toplevel` | Focus a window (computer-use contexts only) |
 
 These tools are registered automatically based on your context configuration.
 
@@ -100,7 +114,7 @@ These tools are registered automatically based on your context configuration.
 ### Server won't connect
 
 1. Check that the server process is available in the PATH
-2. Verify the server configuration in Claude CLI settings
+2. Verify the server configuration in OpenCode global config or the context's `mcp:` config
 3. Try `/mcp reset <name>` to force a reconnection
 4. Check OpenShrimp logs for error details
 

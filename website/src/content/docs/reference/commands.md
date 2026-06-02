@@ -61,7 +61,7 @@ List recent sessions or resume a specific one.
 
 ### `/cancel`
 
-Abort the currently running Claude task. Also clears any queued setup messages.
+Abort the currently running agent task. Also clears any queued setup messages.
 
 ```
 /cancel
@@ -77,7 +77,7 @@ List active background tasks with their elapsed time and description.
 
 ### `/schedule`
 
-List and manage scheduled tasks. Scheduled tasks are cron-like recurring or one-shot Claude prompts that run automatically.
+List and manage scheduled tasks. Scheduled tasks are cron-like recurring or one-shot agent prompts that run automatically.
 
 ```
 /schedule
@@ -88,7 +88,7 @@ To create a scheduled task, just describe it in natural language to the bot:
 
 > Check the deployment status every 30 minutes and tell me if anything is failing.
 
-Claude will use the scheduling MCP tools to set it up.
+The agent will use the scheduling MCP tools to set it up.
 :::
 
 ## Information commands
@@ -99,14 +99,6 @@ Show current state: context name and directory, active model, session ID, runnin
 
 ```
 /status
-```
-
-### `/usage`
-
-Show Claude API quota and usage statistics for your account, including tier information and usage bars.
-
-```
-/usage
 ```
 
 ## Mini App commands

@@ -5,14 +5,14 @@ sidebar:
   order: 10
 ---
 
-OpenShrimp can transcribe voice messages and video notes using Moonshine STT, a lightweight on-device speech recognition model. Send a voice message and the transcribed text is sent to Claude as your prompt.
+OpenShrimp can transcribe voice messages and video notes using Moonshine STT, a lightweight on-device speech recognition model. Send a voice message and the transcribed text is sent to the agent as your prompt.
 
 ## How it works
 
 1. You send a voice message or video note in Telegram
 2. OpenShrimp downloads the audio (OGG/Opus format)
 3. The Moonshine STT binary transcribes it locally
-4. The transcribed text is sent to Claude as your message
+4. The transcribed text is sent to the agent as your message
 
 No external services or API calls — everything runs on your machine.
 
@@ -59,7 +59,7 @@ Models are automatically downloaded from the sherpa-onnx releases on first use.
 
 ## Using voice messages effectively
 
-Voice messages are transcribed and sent to Claude as regular text prompts. Some tips:
+Voice messages are transcribed and sent to the configured model as regular text prompts. Some tips:
 
 - Speak clearly and at a normal pace
 - Describe your request as you would type it

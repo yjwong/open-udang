@@ -1,11 +1,11 @@
 ---
 title: Docker Sandbox
-description: Run Claude in an isolated Docker container with filesystem safety.
+description: Run the agent in an isolated Docker container with filesystem safety.
 sidebar:
   order: 3
 ---
 
-The Docker sandbox runs the Claude CLI inside a Linux container. The project directory is bind-mounted in, but the agent can't access anything else on your host. This means you can safely auto-approve all tool calls — the sandbox provides the safety boundary.
+The Docker sandbox runs OpenCode inside a Linux container. The project directory is bind-mounted in, but the agent can't access anything else on your host. This means you can safely auto-approve all tool calls — the sandbox provides the safety boundary.
 
 ## Basic setup
 
@@ -27,7 +27,7 @@ That's it. OpenShrimp handles building the image and starting the container.
 1. **Image build** — On first use, OpenShrimp builds a Docker image based on the default `openshrimp-opencode` base image. This is cached and reused.
 2. **Container start** — The container runs with your project directory bind-mounted at the same path. It runs as your host uid/gid.
 3. **OpenCode server** — OpenShrimp starts `opencode serve` inside the container and connects to it over a loopback port.
-4. **Auto-approval** — All Bash commands and path-scoped tools are auto-approved since the sandbox isolates the filesystem.
+4. **Auto-approval** — All bash commands and path-scoped tools are auto-approved since the sandbox isolates the filesystem.
 
 ## Custom Dockerfile
 
@@ -95,11 +95,11 @@ Both directories are available at their original paths inside the container.
 
 ## File uploads
 
-When you send files to the bot (photos, documents), they're copied into the container via `docker cp` and placed in a temporary upload directory. Claude can then read and work with them.
+When you send files to the bot (photos, documents), they're copied into the container via `docker cp` and placed in a temporary upload directory. The agent can then read and work with them.
 
 ## Session storage
 
-Each sandboxed context has its own isolated session storage under `~/.local/share/openshrimp/containers/<context>/`. This keeps Claude's session files separate from your host's Claude data.
+Each sandboxed context has its own isolated OpenCode/session storage under `~/.local/share/openshrimp/containers/<context>/`. This keeps sandbox sessions separate from host OpenCode sessions.
 
 ## Computer use
 

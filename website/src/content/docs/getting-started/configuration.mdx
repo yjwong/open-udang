@@ -87,24 +87,24 @@ contexts:
 
 ### Tool approval behavior
 
-Tools listed in `allowed_tools` are passed to the Claude CLI as `--allowedTools` and are always approved. Patterns are supported:
+Tools listed in `allowed_tools` become OpenCode permission rules and are always approved. Command patterns are supported:
 
 ```yaml
 allowed_tools:
   - LSP
-  - "Bash(git *)"     # allow all git commands
-  - "Bash(npm test)"  # allow npm test
+  - "bash(git *)"     # allow all git commands
+  - "bash(npm test)"  # allow npm test
 ```
 
 Tools **not** in this list go through OpenShrimp's path-scoped approval:
 
-- **Read, Glob, Grep** — auto-approved when the target path is within the context directory
-- **Edit, Write** — always require manual approval via Telegram inline keyboard (with an option to "Accept all edits" for the session)
-- **Bash** — requires approval; you can approve by command prefix (e.g. "Accept all `git`")
+- **read, glob, grep** — auto-approved when the target path is within the context directory
+- **edit, write, apply_patch** — always require manual approval via Telegram inline keyboard (with an option to "Accept all edits" for the session)
+- **bash** — requires approval; you can approve by command prefix (e.g. "Accept all `git`")
 - Paths outside the context directory always require manual approval
 
 :::caution
-If you add `Read`, `Write`, `Edit`, `Glob`, or `Grep` to `allowed_tools`, they bypass path checking entirely and the agent can access any file the process can read.
+If you add `read`, `write`, `edit`, `glob`, or `grep` to `allowed_tools`, they bypass path checking entirely and the agent can access any file the process can read.
 :::
 
 ### Optional fields
@@ -134,7 +134,7 @@ contexts:
 
 ### Sandbox
 
-Run the Claude CLI inside an isolated environment:
+Run OpenCode inside an isolated environment:
 
 ```yaml
 contexts:
@@ -147,7 +147,7 @@ contexts:
       computer_use: true       # enable GUI interaction
 ```
 
-When a sandbox is enabled, all Bash commands and path-scoped tools are auto-approved since the sandbox provides the safety boundary.
+When a sandbox is enabled, all bash commands and path-scoped tools are auto-approved since the sandbox provides the safety boundary.
 
 See the dedicated guides for [Docker sandbox](/guides/docker-sandbox/) and [VM sandbox](/guides/vm-sandbox/).
 
@@ -170,11 +170,11 @@ review:
 
 Enables the HTTP server for Mini Apps (Review, Terminal, VNC, Markdown preview). The `tunnel: cloudflared` option auto-starts a [Cloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/) — free, no account needed.
 
-## Environment variables
+## Provider authentication
 
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API key. Optional if using Claude Code OAuth. |
+OpenShrimp uses OpenCode for model-provider authentication. The simplest path is to start the bot, then send `/connect` in a private chat to open OpenCode's provider connection flow.
+
+You can also provide provider-specific environment variables to the OpenShrimp process, such as `OPENAI_API_KEY`, when your chosen OpenCode provider supports them. See [Environment Variables](/reference/environment/) for deployment guidance.
 
 ## Next steps
 

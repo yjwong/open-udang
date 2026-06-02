@@ -18,14 +18,14 @@ contexts:
     description: "React app"
     allowed_tools:
       - LSP
-      - "Bash(npm *)"
+      - "bash(npm *)"
 
   backend:
     directory: /home/you/Documents/backend
     description: "API server"
     allowed_tools:
       - LSP
-      - "Bash(go *)"
+      - "bash(go *)"
     model: openai/gpt-5.5
 
   docs:
@@ -87,7 +87,7 @@ contexts:
       - /home/you/Documents/api-types
 ```
 
-These directories are passed to the Claude CLI as additional working directories. Path-scoped auto-approval (Read, Glob, Grep) extends to them.
+OpenShrimp grants the agent access to these directories and extends path-scoped auto-approval for `read`, `glob`, and `grep` to them.
 
 ## Default and locked contexts
 
@@ -149,4 +149,4 @@ Users can still override the model per-session with `/model openai/gpt-5.5`. The
 
 Each context maintains its own session history. When you switch contexts and come back, your previous conversation is still there. Use `/resume` to browse and resume past sessions for the current context.
 
-Sessions are stored as `.jsonl` files by the Claude CLI under `~/.claude/projects/<encoded-cwd>/`.
+OpenShrimp maps each `(chat, thread, context)` to an OpenCode session in its SQLite database. Host contexts use OpenCode's normal session storage; sandboxed contexts use per-context OpenCode storage managed by OpenShrimp.

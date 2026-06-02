@@ -9,8 +9,8 @@ sidebar:
 
 1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
 2. Send `/newbot`
-3. Choose a display name (e.g. "My Claude")
-4. Choose a username ending in `bot` (e.g. `my_claude_bot`)
+3. Choose a display name (e.g. "My OpenShrimp")
+4. Choose a username ending in `bot` (e.g. `my_agent_bot`)
 5. Copy the **bot token** — it looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
 
 :::tip
@@ -28,9 +28,9 @@ While you're in BotFather, configure these:
 
 OpenShrimp comes alive when you can run more than one conversation at a time, and **Threaded Mode** is what makes that possible — even in a 1-on-1 private chat with the bot.
 
-With Threaded Mode enabled in BotFather, your private chat with the bot can hold many separate threads. Each thread is an independent conversation with its own context, working directory, Claude session, and tool-approval state. Think one thread per project, per task, or per investigation.
+With Threaded Mode enabled in BotFather, your private chat with the bot can hold many separate threads. Each thread is an independent conversation with its own context, working directory, OpenCode session, and tool-approval state. Think one thread per project, per task, or per investigation.
 
-Why this matters: without threads, every message lands in the same Claude session, so a long-running task blocks anything else you'd want to do. With threads, you can have Claude refactoring one repo while you ask it questions about another — neither conversation interferes with the other.
+Why this matters: without threads, every message lands in the same agent session, so a long-running task blocks anything else you'd want to do. With threads, the agent can refactor one repo while you ask it questions about another — neither conversation interferes with the other.
 
 The same model extends to **forum groups** (a group with Topics enabled): each topic is a separate thread, and the bot responds to every message inside a topic without needing an @mention. Use a forum group if you want to share a workspace with other allowed users; otherwise a private chat with Threaded Mode is the simplest setup.
 

@@ -39,7 +39,8 @@ Type=simple
 ExecStart=/path/to/openshrimp --config /home/you/.config/openshrimp/config.yaml
 Restart=on-failure
 RestartSec=5
-Environment=ANTHROPIC_API_KEY=sk-ant-...
+# Optional: provider-specific credentials if you do not use /connect
+Environment=OPENAI_API_KEY=sk-...
 
 [Install]
 WantedBy=default.target
@@ -55,10 +56,10 @@ systemctl --user start open-shrimp
 
 ### Using an environment file
 
-Instead of putting the API key directly in the unit file, you can use an environment file:
+Instead of putting provider credentials directly in the unit file, you can use an environment file:
 
 ```bash
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > ~/.config/openshrimp/.env
+echo 'OPENAI_API_KEY=sk-...' > ~/.config/openshrimp/.env
 chmod 600 ~/.config/openshrimp/.env
 ```
 

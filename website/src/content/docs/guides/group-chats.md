@@ -22,13 +22,13 @@ Telegram forum chats (groups with topics enabled) get special treatment:
 
 - **Each topic is independent** — separate context, session, conversation history, and approval state
 - **No @mention needed** — the bot responds to all messages in forum topics
-- **Topic titles** — Claude can set descriptive topic titles with emoji icons via the `edit_topic` MCP tool
+- **Topic titles** — the agent can set descriptive topic titles with emoji icons via the `openshrimp_edit_topic` MCP tool
 
 This means you can have multiple conversations running in different forum topics, each working on a different project.
 
-### edit_topic tool
+### openshrimp_edit_topic tool
 
-In forum topics, an `edit_topic` MCP tool is automatically registered. Claude can use it to set a concise title (max 128 characters) and an optional icon emoji. This happens automatically — Claude will typically set the topic title based on what you're working on.
+In forum topics, an `openshrimp_edit_topic` MCP tool is automatically registered. The agent can use it to set a concise title (max 128 characters) and an optional icon emoji. This happens automatically — the agent will typically set the topic title based on what you're working on.
 
 ## Default and locked contexts
 

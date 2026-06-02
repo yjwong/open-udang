@@ -159,6 +159,11 @@
         "effort": {
           "default": null
         },
+        "mcp": {
+          "type": "object",
+          "additionalProperties": {},
+          "default": {}
+        },
         "additional_directories": {
           "type": "array",
           "items": {
