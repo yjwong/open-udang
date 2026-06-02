@@ -44,3 +44,30 @@ async def get_json(path: str, *, params: dict[str, Any] | None = None) -> Any:
             f"GET {path} returned {r.status_code}: {r.text[:300]}"
         )
     return r.json()
+
+
+async def get_json_from_server(
+    base_url: str,
+    auth_header: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    """``GET <path>`` against an already-running OpenCode server."""
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=30.0,
+        headers={"Authorization": auth_header},
+    ) as http:
+        try:
+            r = await http.get(path, params=params)
+        except httpx.HTTPError as exc:
+            raise CLIConnectionError(f"GET {path} failed: {exc}") from exc
+
+    if r.status_code == 401:
+        raise OpenCodeAuthError("opencode serve rejected our credentials")
+    if r.status_code >= 400:
+        raise ProcessError(
+            f"GET {path} returned {r.status_code}: {r.text[:300]}"
+        )
+    return r.json()

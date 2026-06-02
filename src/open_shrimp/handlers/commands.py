@@ -23,7 +23,7 @@ from open_shrimp.client_manager import (
     close_session,
     get_session,
 )
-from open_shrimp.config import Config, ContextConfig
+from open_shrimp.config import Config, ContextConfig, is_sandboxed
 from open_shrimp.db import ChatScope, delete_session, get_session_id, set_session_id
 from open_shrimp.opencode_client import list_sessions
 from open_shrimp.handlers.state import (
@@ -855,23 +855,54 @@ async def _reconnect_after_dir_change(
 
 
 async def _list_sessions_for_context(
+    ctx_name: str,
     ctx: ContextConfig,
     *,
+    sandbox_manager: Any | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> "list[Any]":
-    """Return ``SessionInfo`` rows for *ctx*. Sandboxed contexts return ``[]``."""
-    if ctx.sandbox is not None and ctx.sandbox.enabled:
-        # TODO(sandbox-resume): read OpenCode's per-sandbox SQLite from the
-        # sandbox backend's opencode-home directory.
-        return []
+    """Return ``SessionInfo`` rows for *ctx*."""
     # OpenCode ignores `offset=`; ask for `offset + limit` rows and
     # slice. We pass a request bound so the wire fetch shrinks with
     # smaller pages — otherwise every /resume page fetches 500.
     fetch = (offset + limit) if limit is not None else 500
-    sessions = await list_sessions(ctx.directory, limit=fetch)
+    if is_sandboxed(ctx):
+        if sandbox_manager is None:
+            return []
+        opencode_home = sandbox_manager.opencode_home_dir(ctx_name)
+        if not opencode_home.exists():
+            return []
+
+        sandbox = sandbox_manager.create_sandbox(ctx_name, ctx)
+
+        def _ensure_server() -> Any:
+            sandbox.ensure_environment()
+            sandbox.ensure_running()
+            sandbox.provision_workspace()
+            return sandbox.ensure_opencode_server()
+
+        server = await asyncio.to_thread(_ensure_server)
+        sessions = await list_sessions(
+            ctx.directory,
+            limit=fetch,
+            base_url=server.base_url,
+            auth_header=server.auth_header,
+        )
+    else:
+        sessions = await list_sessions(ctx.directory, limit=fetch)
     end = (offset + limit) if limit is not None else None
     return sessions[offset:end]
+
+
+def _select_sandbox_manager_for_context(
+    ctx: ContextConfig,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> Any | None:
+    if ctx.sandbox is None:
+        return None
+    sandbox_managers = context.bot_data.get("sandbox_managers") or {}
+    return sandbox_managers.get(ctx.sandbox.backend)
 
 
 # ── /resume ──
@@ -903,6 +934,7 @@ async def _build_resume_page(
     db: aiosqlite.Connection,
     scope: ChatScope,
     page: int,
+    sandbox_manager: Any | None = None,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """Build a single page of the resume session list.
 
@@ -913,24 +945,23 @@ async def _build_resume_page(
     offset = page * per_page
     # Fetch one extra to detect whether a next page exists.
     sessions = await _list_sessions_for_context(
-        ctx, limit=per_page + 1, offset=offset,
+        ctx_name,
+        ctx,
+        sandbox_manager=sandbox_manager,
+        limit=per_page + 1,
+        offset=offset,
     )
 
     if not sessions:
-        if ctx.sandbox is not None and ctx.sandbox.enabled:
-            # TODO(sandbox-resume): see _list_sessions_for_context.
-            return (
-                "Session listing for sandboxed contexts arrives with the "
-                "sandbox rework\\.",
-                None,
-            )
         if page == 0:
             return (
                 f"No sessions found for context `{_escape_mdv2(ctx_name)}`\\.",
                 None,
             )
         # Edge case: page beyond last – go back.
-        return await _build_resume_page(ctx_name, ctx, db, scope, page - 1)
+        return await _build_resume_page(
+            ctx_name, ctx, db, scope, page - 1, sandbox_manager,
+        )
 
     has_next = len(sessions) > per_page
     sessions = sessions[:per_page]
@@ -1054,7 +1085,11 @@ async def resume_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(args) >= 2:
         # Direct resume by session ID (or prefix)
         target = args[1]
-        sessions = await _list_sessions_for_context(ctx)
+        sessions = await _list_sessions_for_context(
+            ctx_name,
+            ctx,
+            sandbox_manager=_select_sandbox_manager_for_context(ctx, context),
+        )
         match = None
         for s in sessions:
             if s.session_id == target or s.session_id.startswith(target):
@@ -1079,7 +1114,14 @@ async def resume_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     # List recent sessions for the current context (page 0)
-    text, keyboard = await _build_resume_page(ctx_name, ctx, db, scope, page=0)
+    text, keyboard = await _build_resume_page(
+        ctx_name,
+        ctx,
+        db,
+        scope,
+        page=0,
+        sandbox_manager=_select_sandbox_manager_for_context(ctx, context),
+    )
 
     if keyboard is None:
         await message.reply_text(text, parse_mode="MarkdownV2")
@@ -1121,7 +1163,12 @@ async def handle_resume_callback(
         # Use the context name from the callback to stay consistent
         ctx = config.contexts.get(ctx_name_req, ctx)
         text, keyboard = await _build_resume_page(
-            ctx_name_req, ctx, db, scope, page,
+            ctx_name_req,
+            ctx,
+            db,
+            scope,
+            page,
+            sandbox_manager=_select_sandbox_manager_for_context(ctx, context),
         )
         await query.answer()
         try:

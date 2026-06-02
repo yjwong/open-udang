@@ -72,6 +72,13 @@ async def test_list_sessions_empty_directory_raises(
         await list_sessions("")
 
 
+async def test_list_sessions_requires_complete_explicit_server(
+    tmp_path,
+) -> None:
+    with pytest.raises(ValueError):
+        await list_sessions(tmp_path, base_url="http://127.0.0.1:4096")
+
+
 async def test_list_sessions_returns_empty_when_nothing_matches(
     mock_server: MockOpenCode, wired_server, tmp_path,
 ) -> None:

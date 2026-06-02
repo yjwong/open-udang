@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from open_shrimp.opencode_client._http import get_json
+from open_shrimp.opencode_client._http import get_json, get_json_from_server
 from open_shrimp.opencode_client.errors import ProcessError
 
 
@@ -28,6 +28,8 @@ async def list_sessions(
     directory: str | Path,
     *,
     limit: int = 500,
+    base_url: str | None = None,
+    auth_header: str | None = None,
 ) -> list[SessionInfo]:
     """List sessions whose directory matches *directory*, newest first.
 
@@ -42,9 +44,15 @@ async def list_sessions(
         raise ValueError("list_sessions requires a non-empty directory")
     canonical = str(Path(raw).resolve())
 
-    rows = await get_json(
-        "/session", params={"directory": canonical, "limit": limit},
-    )
+    params = {"directory": canonical, "limit": limit}
+    if base_url is not None or auth_header is not None:
+        if base_url is None or auth_header is None:
+            raise ValueError("base_url and auth_header must be provided together")
+        rows = await get_json_from_server(
+            base_url, auth_header, "/session", params=params,
+        )
+    else:
+        rows = await get_json("/session", params=params)
     if not isinstance(rows, list):
         raise ProcessError(f"GET /session returned non-list: {rows!r}")
 
