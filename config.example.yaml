@@ -13,6 +13,19 @@ contexts:
     description: "Default context"
     # model: openai/gpt-5.5  # Optional override. Use provider/model.
     # effort: medium  # Optional thinking effort level: low, medium, high, xhigh, max. Omit for CLI default.
+    # mcp:  # Optional per-context MCP servers. Kept in OpenShrimp's private config.
+    #   production-db:
+    #     command: uvx
+    #     args:
+    #       - postgres-mcp
+    #       - --access-mode=restricted
+    #     env:
+    #       DATABASE_URI: ${PRODUCTION_DATABASE_URI}
+    #   internal-api:
+    #     type: http
+    #     url: https://internal.example.com/mcp
+    #     headers:
+    #       Authorization: Bearer ${INTERNAL_API_TOKEN}
     allowed_tools:
       - LSP
       # Note: Read, Glob, Grep, Write, and Edit are intentionally NOT listed

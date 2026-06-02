@@ -76,6 +76,7 @@ class ContextConfig:
     allowed_tools: list[str]
     model: str | None = None
     effort: EffortLevel | None = None
+    mcp: dict[str, Any] = field(default_factory=dict)
     additional_directories: list[str] = field(default_factory=list)
     default_for_chats: list[int] = field(default_factory=list)
     locked_for_chats: list[int] = field(default_factory=list)
@@ -163,6 +164,19 @@ def _validate_raw(raw: dict) -> None:
             raise ValueError(
                 f"Context '{name}': effort must be a string, got: {effort!r}"
             )
+        mcp = ctx.get("mcp", {})
+        if not isinstance(mcp, dict):
+            raise ValueError(f"Context '{name}': mcp must be a mapping")
+        for server_name, server_config in mcp.items():
+            if not isinstance(server_name, str):
+                raise ValueError(
+                    f"Context '{name}': mcp server names must be strings, "
+                    f"got: {server_name!r}"
+                )
+            if not isinstance(server_config, dict):
+                raise ValueError(
+                    f"Context '{name}': mcp.{server_name} must be a mapping"
+                )
 
     # Validate container config
     for name, ctx in contexts.items():
@@ -365,6 +379,7 @@ def _parse(raw: dict) -> Config:
             allowed_tools=ctx["allowed_tools"],
             model=ctx.get("model"),
             effort=ctx.get("effort"),
+            mcp=ctx.get("mcp", {}),
             additional_directories=ctx.get("additional_directories", []),
             default_for_chats=ctx.get("default_for_chats", []),
             locked_for_chats=ctx.get("locked_for_chats", []),
@@ -450,6 +465,8 @@ def config_to_dict(config: Config) -> dict[str, Any]:
             ctx_dict["model"] = ctx.model
         if ctx.effort is not None:
             ctx_dict["effort"] = ctx.effort
+        if ctx.mcp:
+            ctx_dict["mcp"] = ctx.mcp
         if ctx.additional_directories:
             ctx_dict["additional_directories"] = ctx.additional_directories
         if ctx.default_for_chats:

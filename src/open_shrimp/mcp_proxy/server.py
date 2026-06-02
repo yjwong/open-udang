@@ -291,15 +291,18 @@ async def _forward_http(
     config: HttpServerConfig,
     http_client: httpx.AsyncClient,
 ) -> Response:
-    """Reverse-proxy *request* to *config.url* with OAuth injected."""
+    """Reverse-proxy *request* to *config.url* with host credentials injected."""
     cred = get_oauth_credential(server_name, config.url)
-    if cred is None:
+    has_static_authorization = any(
+        key.lower() == "authorization" for key in config.headers
+    )
+    if cred is None and not has_static_authorization:
         return JSONResponse(
             {"error": f"no OAuth credential on host for '{server_name}' "
                       f"({config.url}). Run /mcp on the host to authenticate."},
             status_code=401,
         )
-    if is_expired(cred):
+    if cred is not None and is_expired(cred):
         return JSONResponse(
             {"error": f"OAuth credential for '{server_name}' has expired. "
                       f"Run /mcp on the host to re-authenticate."},
@@ -312,7 +315,8 @@ async def _forward_http(
         if k.lower() not in _STRIP_INBOUND
     }
     outbound_headers.update(config.headers)
-    outbound_headers["Authorization"] = f"Bearer {cred.access_token}"
+    if cred is not None:
+        outbound_headers["Authorization"] = f"Bearer {cred.access_token}"
 
     method = request.method
     req_kwargs: dict[str, Any] = {

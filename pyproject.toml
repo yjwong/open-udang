@@ -21,6 +21,7 @@ dependencies = [
     "platformdirs>=4.0",
     "watchfiles>=1.0",
     "ruamel.yaml>=0.18",
+    "json5>=0.12",
 ]
 
 [project.optional-dependencies]

@@ -525,9 +525,13 @@ async def get_or_create_session(
                 get_mcp_servers_for_directory,
             )
 
-            stdio_servers = get_mcp_servers_for_directory(context.directory)
+            stdio_servers = get_mcp_servers_for_directory(
+                context.directory,
+                context,
+            )
             http_servers = get_http_mcp_servers_for_directory(
-                context.directory
+                context.directory,
+                context,
             )
             if stdio_servers or http_servers:
                 token = mcp_proxy.register_context(

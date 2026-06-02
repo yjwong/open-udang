@@ -1,8 +1,9 @@
-"""Read MCP server configurations from OpenCode config.
+"""Read MCP server configurations for the MCP proxy.
 
-Extracts *user-scope* (root ``mcpServers``) and *local-scope*
-(``projects[normalised_path].mcpServers``) stdio server configs so the
-MCP proxy can spawn them on the host on behalf of a sandboxed context.
+Extracts global MCP servers from OpenCode's real ``mcp`` schema and
+per-context MCP servers from OpenShrimp's private context config.  The MCP
+proxy can then expose them to sandboxed OpenCode sessions without copying
+credentials into project repositories or guest filesystems.
 """
 
 from __future__ import annotations
@@ -14,6 +15,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, TypeVar
+
+import json5
+
+from open_shrimp.config import ContextConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +64,15 @@ def get_opencode_config_path() -> Path:
     return config_home / "opencode" / "opencode.json"
 
 
-def _normalise_path_for_config_key(path: str) -> str:
-    """Normalise *path* to match the key format used in OpenCode config.
-
-    On Linux/macOS this is equivalent to ``os.path.normpath``.  On Windows
-    backslashes are also converted to forward slashes.
-    """
-    normalised = os.path.normpath(path)
-    return normalised.replace("\\", "/")
+def _get_existing_opencode_config_path() -> Path:
+    """Return the OpenCode config path, accepting ``.jsonc`` as fallback."""
+    path = get_opencode_config_path()
+    if path.is_file():
+        return path
+    jsonc_path = path.with_suffix(".jsonc")
+    if jsonc_path.is_file():
+        return jsonc_path
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -117,20 +123,24 @@ def load_opencode_config() -> dict[str, Any]:
 
     Returns an empty dict if the file doesn't exist or can't be parsed.
     """
-    config_path = get_opencode_config_path()
+    config_path = _get_existing_opencode_config_path()
     if not config_path.is_file():
         return {}
     try:
-        return json.loads(config_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
-    except (json.JSONDecodeError, OSError) as exc:
+        text = config_path.read_text(encoding="utf-8")
+        if config_path.suffix == ".jsonc":
+            parsed = json5.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        return json.loads(text)  # type: ignore[no-any-return]
+    except (ValueError, OSError) as exc:
         logger.warning("Failed to read %s: %s", config_path, exc)
         return {}
 
 
-def _parse_stdio_servers(
+def _parse_claude_stdio_servers(
     raw_servers: dict[str, Any] | None,
 ) -> dict[str, StdioServerConfig]:
-    """Extract stdio server configs from a raw ``mcpServers`` dict.
+    """Extract stdio server configs from Claude/OpenShrimp-shaped entries.
 
     Servers with an explicit ``type`` other than ``"stdio"`` are skipped
     (they are http/sse/sdk servers that don't need proxying).
@@ -149,7 +159,7 @@ def _parse_stdio_servers(
         command = entry.get("command")
         if not command or not isinstance(command, str):
             logger.warning(
-                "MCP server '%s' in OpenCode config has no command, skipping", name
+                "MCP server '%s' has no command, skipping", name
             )
             continue
         raw_args = entry.get("args", [])
@@ -162,10 +172,10 @@ def _parse_stdio_servers(
     return result
 
 
-def _parse_http_servers(
+def _parse_claude_http_servers(
     raw_servers: dict[str, Any] | None,
 ) -> dict[str, HttpServerConfig]:
-    """Extract HTTP/SSE server configs from a raw ``mcpServers`` dict."""
+    """Extract HTTP/SSE server configs from Claude/OpenShrimp-shaped entries."""
     if not raw_servers:
         return {}
 
@@ -196,36 +206,92 @@ def _parse_http_servers(
     return result
 
 
+def _parse_opencode_stdio_servers(
+    raw_servers: dict[str, Any] | None,
+) -> dict[str, StdioServerConfig]:
+    """Extract local stdio servers from OpenCode's ``mcp`` schema."""
+    if not raw_servers:
+        return {}
+
+    result: dict[str, StdioServerConfig] = {}
+    for name, entry in raw_servers.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        if entry.get("type") != "local":
+            continue
+        command = entry.get("command")
+        if not isinstance(command, list) or not command:
+            logger.warning(
+                "OpenCode MCP server '%s' has no local command list, skipping",
+                name,
+            )
+            continue
+        if not all(isinstance(part, str) for part in command):
+            logger.warning(
+                "OpenCode MCP server '%s' command must contain only strings, skipping",
+                name,
+            )
+            continue
+        raw_env = entry.get("environment", entry.get("env", {}))
+        result[name] = StdioServerConfig(
+            command=_expand_env_vars(command[0]),
+            args=_expand_server_args(command[1:]),
+            env=_expand_server_env(raw_env if isinstance(raw_env, dict) else {}),
+        )
+    return result
+
+
+def _parse_opencode_http_servers(
+    raw_servers: dict[str, Any] | None,
+) -> dict[str, HttpServerConfig]:
+    """Extract remote HTTP servers from OpenCode's ``mcp`` schema."""
+    if not raw_servers:
+        return {}
+
+    result: dict[str, HttpServerConfig] = {}
+    for name, entry in raw_servers.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        if entry.get("type") != "remote":
+            continue
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            logger.warning("OpenCode MCP server '%s' has no url, skipping", name)
+            continue
+        raw_headers = entry.get("headers", {})
+        headers = {
+            k: _expand_env_vars(v)
+            for k, v in (raw_headers if isinstance(raw_headers, dict) else {}).items()
+            if isinstance(v, str)
+        }
+        result[name] = HttpServerConfig(
+            url=_expand_env_vars(url),
+            transport="http",
+            headers=headers,
+        )
+    return result
+
+
 _T = TypeVar("_T")
 
 
-def _merge_user_and_local(
+def _merge_opencode_and_context(
     project_dir: str,
-    parser: Callable[[dict[str, Any] | None], dict[str, _T]],
+    context: ContextConfig | None,
+    opencode_parser: Callable[[dict[str, Any] | None], dict[str, _T]],
+    context_parser: Callable[[dict[str, Any] | None], dict[str, _T]],
     label: str,
 ) -> dict[str, _T]:
-    """Merge user-scope and local-scope servers for *project_dir*.
-
-    User-scope entries come from the root-level ``mcpServers`` in
-    OpenCode config; local-scope entries come from
-    ``projects[normalised_dir].mcpServers`` and win on name conflicts.
-    """
+    """Merge OpenCode global servers with OpenShrimp per-context servers."""
     config = load_opencode_config()
-    if not config:
-        return {}
+    opencode_servers = opencode_parser(config.get("mcp")) if config else {}
+    context_servers = context_parser(context.mcp) if context is not None else {}
 
-    user_servers = parser(config.get("mcpServers"))
-
-    local_servers: dict[str, _T] = {}
-    projects = config.get("projects")
-    if isinstance(projects, dict):
-        resolved_dir = str(Path(project_dir).resolve())
-        key = _normalise_path_for_config_key(resolved_dir)
-        project_config = projects.get(key, {})
-        if isinstance(project_config, dict):
-            local_servers = parser(project_config.get("mcpServers"))
-
-    merged = {**user_servers, **local_servers}
+    merged = {**opencode_servers, **context_servers}
     if merged:
         logger.info(
             "Found %d %s MCP server(s) for %s: %s",
@@ -239,13 +305,27 @@ def _merge_user_and_local(
 
 def get_mcp_servers_for_directory(
     project_dir: str,
+    context: ContextConfig | None = None,
 ) -> dict[str, StdioServerConfig]:
     """Return stdio MCP servers applicable to *project_dir*."""
-    return _merge_user_and_local(project_dir, _parse_stdio_servers, "stdio")
+    return _merge_opencode_and_context(
+        project_dir,
+        context,
+        _parse_opencode_stdio_servers,
+        _parse_claude_stdio_servers,
+        "stdio",
+    )
 
 
 def get_http_mcp_servers_for_directory(
     project_dir: str,
+    context: ContextConfig | None = None,
 ) -> dict[str, HttpServerConfig]:
     """Return HTTP/SSE MCP servers applicable to *project_dir*."""
-    return _merge_user_and_local(project_dir, _parse_http_servers, "HTTP")
+    return _merge_opencode_and_context(
+        project_dir,
+        context,
+        _parse_opencode_http_servers,
+        _parse_claude_http_servers,
+        "HTTP",
+    )
